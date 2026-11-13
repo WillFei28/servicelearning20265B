@@ -1,4 +1,7 @@
 #include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 #include <AudioFileSourcePROGMEM.h>
 #include <AudioGeneratorMP3.h>
 #include <AudioOutputI2S.h>
@@ -24,6 +27,10 @@
 // VIN -> red 5V, GND -> black G. Leave GAIN and SD empty.
 // The speaker connects to the module's speaker terminals.
 // While any S is present the 4 second crossing clip loops.
+//
+// 0.96 inch SSD1306, 128x64, I2C. Wired as plugged on the top-right header:
+//   VCC -> VCC, GND -> GND, SCL -> D21, SDA -> D22.
+// S present draws X. N present draws TICK. Neither leaves the screen blank.
 
 static constexpr int kMosPin = 18;
 static constexpr int kZPin = 34;
@@ -48,6 +55,11 @@ static constexpr int kPulse180Us = 2400;
 static constexpr int kLrcPin = 33;
 static constexpr int kBclkPin = 25;
 static constexpr int kDinPin = 26;
+static constexpr int kSdaPin = 22;
+static constexpr int kSclPin = 21;
+static constexpr int kScreenWidth = 128;
+static constexpr int kScreenHeight = 64;
+static constexpr uint8_t kScreenAddr = 0x3C;
 
 enum class Lamp : uint8_t { Off, Solid, Blink };
 
@@ -61,6 +73,8 @@ static AudioFileSourcePROGMEM *gFile = nullptr;
 static AudioGeneratorMP3 *gMp3 = nullptr;
 static bool gSoundOn = false;
 static uint32_t gNextStartMs = 0;
+static Adafruit_SSD1306 gDisplay(kScreenWidth, kScreenHeight, &Wire, -1);
+static bool gDisplayOk = false;
 
 static void selectChannel(int channel) {
   digitalWrite(kS0Pin, channel & 0x1);
@@ -126,6 +140,50 @@ static void setLamp(Lamp lamp) {
     blinkOn = !blinkOn;
     digitalWrite(kMosPin, blinkOn ? HIGH : LOW);
   }
+}
+
+static void drawCentered(const char *text, int size, int top) {
+  const int width = static_cast<int>(strlen(text)) * 6 * size;
+  const int left = (kScreenWidth - width) / 2;
+  gDisplay.setTextSize(size);
+  gDisplay.setCursor(left < 0 ? 0 : left, top);
+  gDisplay.print(text);
+}
+
+static void initDisplay() {
+  Wire.begin(kSdaPin, kSclPin);
+  gDisplayOk = gDisplay.begin(SSD1306_SWITCHCAPVCC, kScreenAddr);
+  if (!gDisplayOk) {
+    Serial.println("display begin failed");
+    return;
+  }
+  gDisplay.clearDisplay();
+  gDisplay.display();
+}
+
+static void showPoles(bool north, bool south) {
+  if (!gDisplayOk) {
+    return;
+  }
+  static int shown = -1;
+  const int mark = (north ? 2 : 0) | (south ? 1 : 0);
+  if (mark == shown) {
+    return;
+  }
+  shown = mark;
+
+  gDisplay.clearDisplay();
+  gDisplay.setTextColor(SSD1306_WHITE);
+  gDisplay.setTextWrap(false);
+  if (south && north) {
+    drawCentered("X", 3, 6);
+    drawCentered("TICK", 2, 40);
+  } else if (south) {
+    drawCentered("X", 5, 12);
+  } else if (north) {
+    drawCentered("TICK", 3, 20);
+  }
+  gDisplay.display();
 }
 
 static void initSound() {
@@ -213,6 +271,7 @@ void setup() {
   writeServo(false);
 
   Serial.begin(115200);
+  initDisplay();
   Serial.println("Calibrating. Keep magnets away.");
   calibrateIdle();
   initSound();
@@ -254,6 +313,7 @@ void loop() {
     }
     writeServo(gAnySouth);
     serviceSound(gAnySouth);
+    showPoles(anyNorth, gAnySouth);
 
     for (int i = 0; i < kSensorCount; ++i) {
       const int delta = mv[i] - gIdleMv[i];
