@@ -1,0 +1,37 @@
+connectors:
+  ESP32:
+    type: ESP32-WROOM-32 DevKit
+    notes: "Goouuu ESP32S 38P. Yellow pin is signal, red pin is 5V, black pin is GND."
+    pinlabels: [GPIO25 BCLK, GPIO26 DIN, GPIO33 LRC, 5V, GND]
+    pincolors: [YE, YE, YE, RD, BK]
+  MAX98357A:
+    type: I2S amplifier
+    notes: "GAIN and SD stay open. Do not tie them to GND or 3.3V."
+    pinlabels: [BCLK, DIN, LRC, VIN, GND, SPK+, SPK-, GAIN, SD]
+  Speaker:
+    type: 8 ohm 1-2W
+    notes: "Both wires go only to the amplifier speaker terminals."
+    pinlabels: [+, -]
+
+cables:
+  I2S:
+    colors: [YE, YE, YE, RD, BK]
+    category: bundle
+    notes: "Signal wires are the yellow header pins."
+  Speaker cable:
+    colors: [RD, BK]
+    category: bundle
+
+connections:
+  -
+    - ESP32: [1-5]
+    - I2S: [1-5]
+    - MAX98357A: [1-5]
+  -
+    - MAX98357A: [6-7]
+    - Speaker cable: [1-2]
+    - Speaker: [1-2]
+
+metadata:
+  title: EXP 1 Sound
+  description: "MAX98357A on the ESP32. LRC is GPIO33, BCLK is GPIO25, DIN is GPIO26. Matches src/main.cpp."

@@ -1,0 +1,7 @@
+Id	Description	Qty	Unit	Designators
+1	Connector, 8 ohm 1-2W, 2 pins	1		Speaker
+2	Connector, ESP32-WROOM-32 DevKit, 5 pins	1		ESP32
+3	Connector, I2S amplifier, 9 pins	1		MAX98357A
+4	Wire, BK	0	m	I2S, Speaker cable
+5	Wire, RD	0	m	I2S, Speaker cable
+6	Wire, YE	0	m	I2S
