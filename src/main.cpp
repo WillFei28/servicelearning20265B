@@ -21,9 +21,8 @@
 // brown wire to black G. S present turns it to 180 degrees. Otherwise 0.
 //
 // MAX98357A: LRC -> yellow 33, BCLK -> yellow 25, DIN -> yellow 26.
-// VIN -> red 5V, GND -> black G. Speaker on the module's speaker terminals.
-// Leave GAIN and SD unconnected. SD tied to G shuts the amp off.
-// If there is still no boot beep, connect SD to yellow 32. That pin is held high.
+// VIN -> red 5V, GND -> black G. Leave GAIN and SD empty.
+// The speaker connects to the module's speaker terminals.
 // While any S is present the 4 second crossing clip loops.
 
 static constexpr int kMosPin = 18;
@@ -49,7 +48,6 @@ static constexpr int kPulse180Us = 2400;
 static constexpr int kLrcPin = 33;
 static constexpr int kBclkPin = 25;
 static constexpr int kDinPin = 26;
-static constexpr int kAmpSdPin = 32;
 
 enum class Lamp : uint8_t { Off, Solid, Blink };
 
@@ -130,8 +128,6 @@ static void setLamp(Lamp lamp) {
   }
 }
 
-static void playBeep();
-
 static void initSound() {
   gOut = new AudioOutputI2S();
   gFile = new AudioFileSourcePROGMEM(kCrossingMp3, kCrossingMp3Len);
@@ -145,33 +141,6 @@ static void initSound() {
   gOut->SetPinout(kBclkPin, kLrcPin, kDinPin);
   gOut->SetGain(0.7);
   gOut->SetOutputModeMono(true);
-  playBeep();
-}
-
-static void playBeep() {
-  if (gOut == nullptr) {
-    return;
-  }
-  Serial.println("beep");
-  gOut->SetOutputModeMono(false);
-  gOut->SetGain(1.0f);
-  gOut->SetBitsPerSample(16);
-  gOut->SetChannels(2);
-  gOut->SetRate(16000);
-  if (!gOut->begin()) {
-    Serial.println("beep begin failed");
-    return;
-  }
-  for (int i = 0; i < 8000; ++i) {
-    const int16_t sample = ((i / 8) & 1) ? 22000 : -22000;
-    int16_t frame[2] = {sample, sample};
-    while (!gOut->ConsumeSample(frame)) {
-      delay(1);
-    }
-  }
-  gOut->SetGain(0.7f);
-  gOut->SetOutputModeMono(true);
-  Serial.println("beep done");
 }
 
 static bool startSound() {
@@ -242,10 +211,6 @@ void setup() {
   ledcSetup(kServoChannel, 50, kServoBits);
   ledcAttachPin(kServoPin, kServoChannel);
   writeServo(false);
-
-  digitalWrite(kAmpSdPin, HIGH);
-  pinMode(kAmpSdPin, OUTPUT);
-  digitalWrite(kAmpSdPin, HIGH);
 
   Serial.begin(115200);
   Serial.println("Calibrating. Keep magnets away.");
