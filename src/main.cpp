@@ -142,14 +142,6 @@ static void setLamp(Lamp lamp) {
   }
 }
 
-static void drawCentered(const char *text, int size, int top) {
-  const int width = static_cast<int>(strlen(text)) * 6 * size;
-  const int left = (kScreenWidth - width) / 2;
-  gDisplay.setTextSize(size);
-  gDisplay.setCursor(left < 0 ? 0 : left, top);
-  gDisplay.print(text);
-}
-
 static void drawBoldLine(int x0, int y0, int x1, int y1, int radius) {
   for (int dy = -radius; dy <= radius; ++dy) {
     for (int dx = -radius; dx <= radius; ++dx) {
@@ -163,6 +155,11 @@ static void drawBoldLine(int x0, int y0, int x1, int y1, int radius) {
 static void drawTick(int x0, int y0, int x1, int y1, int x2, int y2, int radius) {
   drawBoldLine(x0, y0, x1, y1, radius);
   drawBoldLine(x1, y1, x2, y2, radius);
+}
+
+static void drawCross(int left, int top, int right, int bottom, int radius) {
+  drawBoldLine(left, top, right, bottom, radius);
+  drawBoldLine(right, top, left, bottom, radius);
 }
 
 static void initDisplay() {
@@ -188,13 +185,11 @@ static void showPoles(bool north, bool south) {
   shown = mark;
 
   gDisplay.clearDisplay();
-  gDisplay.setTextColor(SSD1306_WHITE);
-  gDisplay.setTextWrap(false);
   if (south && north) {
-    drawCentered("X", 3, 4);
+    drawCross(34, 4, 94, 28, 2);
     drawTick(40, 42, 56, 58, 92, 34, 2);
   } else if (south) {
-    drawCentered("X", 5, 12);
+    drawCross(26, 8, 102, 56, 3);
   } else if (north) {
     drawTick(30, 34, 54, 56, 102, 10, 3);
   }
