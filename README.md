@@ -92,7 +92,7 @@ N 長亮，S 每秒閃 2 下，無磁鐵熄滅。
 | GND | 黑 G |
 | 喇叭兩端 | 模組的喇叭端子 |
 
-接線圖在 `docs/wiring/exp1-sound.svg`。YAML 是 `docs/wiring/exp1-sound.yml`，本機 WireViz 加 Graphviz 畫出嚟，腳位同上面一樣。
+接線圖在 `docs/wiring/exp1-sound.svg`。圖上用擴展板針號同線色：P25 黃接 BCLK，P26 黃接 DIN，P33 黃接 LRC，紅針接 VIN，黑針接 GND。YAML 是 `docs/wiring/exp1-sound.yml`，本機 WireViz 加 Graphviz 畫出嚟。
 
 ### 0.96 吋 SSD1306（128×64，I2C 位址 0x3C）
 

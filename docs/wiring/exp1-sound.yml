@@ -1,37 +1,43 @@
+options:
+  fontname: WenQuanYi Micro Hei
+
 connectors:
-  ESP32:
-    type: ESP32-WROOM-32 DevKit
-    notes: "Goouuu ESP32S 38P. Yellow pin is signal, red pin is 5V, black pin is GND."
-    pinlabels: [GPIO25 BCLK, GPIO26 DIN, GPIO33 LRC, 5V, GND]
+  擴展板:
+    type: ESP32 38-pin 黃針
+    notes: "黃針係訊號。紅針係 5V，跳線帽撥去 5V。黑針係 G。"
+    pinlabels: [P25 黃, P26 黃, P33 黃, 5V 紅, G 黑]
     pincolors: [YE, YE, YE, RD, BK]
   MAX98357A:
-    type: I2S amplifier
-    notes: "GAIN and SD stay open. Do not tie them to GND or 3.3V."
-    pinlabels: [BCLK, DIN, LRC, VIN, GND, SPK+, SPK-, GAIN, SD]
-  Speaker:
-    type: 8 ohm 1-2W
-    notes: "Both wires go only to the amplifier speaker terminals."
-    pinlabels: [+, -]
+    type: 喇叭功放
+    notes: "GAIN 同 SD 留空。唔好接地，亦唔好接 3.3V。"
+    pinlabels: [BCLK, DIN, LRC, VIN, GND, 喇叭+, 喇叭-, GAIN 留空, SD 留空]
+  小喇叭:
+    type: 8Ω
+    notes: "兩條線只鎖喺功放的喇叭螺絲。"
+    pinlabels: [紅, 黑]
+    pincolors: [RD, BK]
 
 cables:
-  I2S:
+  杜邦線:
     colors: [YE, YE, YE, RD, BK]
+    wirelabels: [P25 去 BCLK, P26 去 DIN, P33 去 LRC, 5V 去 VIN, G 去 GND]
     category: bundle
-    notes: "Signal wires are the yellow header pins."
-  Speaker cable:
+    notes: "訊號三條都係黃線，靠針號分辨。"
+  喇叭線:
     colors: [RD, BK]
+    wirelabels: [紅去喇叭+, 黑去喇叭-]
     category: bundle
 
 connections:
   -
-    - ESP32: [1-5]
-    - I2S: [1-5]
+    - 擴展板: [1-5]
+    - 杜邦線: [1-5]
     - MAX98357A: [1-5]
   -
     - MAX98357A: [6-7]
-    - Speaker cable: [1-2]
-    - Speaker: [1-2]
+    - 喇叭線: [1-2]
+    - 小喇叭: [1-2]
 
 metadata:
-  title: EXP 1 Sound
-  description: "MAX98357A on the ESP32. LRC is GPIO33, BCLK is GPIO25, DIN is GPIO26. Matches src/main.cpp."
+  title: EXP 1 接聲音
+  description: "擴展板 P25 黃接 BCLK，P26 黃接 DIN，P33 黃接 LRC。對應 src/main.cpp 的 GPIO25、GPIO26、GPIO33。"
