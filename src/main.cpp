@@ -11,6 +11,9 @@
 // Each sensor is compared with its own idle voltage, taken at boot with
 // no magnet nearby. N is a drop, S is a rise. Idle levels differ per
 // channel, so a fixed threshold falsely treats the low channels as N.
+//
+// SG90 on GPIO13: orange wire to yellow 13, red wire to a red 5V pin,
+// brown wire to black G. S present turns it to 180 degrees. Otherwise 0.
 
 static constexpr int kMosPin = 18;
 static constexpr int kZPin = 34;
@@ -25,6 +28,12 @@ static constexpr int kDeltaMv = 250;
 static constexpr uint32_t kBlinkHalfMs = 250;
 static constexpr int kSamples = 8;
 static constexpr int kCalRounds = 16;
+static constexpr int kServoPin = 13;
+static constexpr int kServoChannel = 0;
+static constexpr int kServoBits = 16;
+static constexpr int kServoPeriodUs = 20000;
+static constexpr int kPulse0Us = 544;
+static constexpr int kPulse180Us = 2400;
 
 enum class Lamp : uint8_t { Off, Solid, Blink };
 
@@ -59,6 +68,19 @@ static void calibrateIdle() {
   for (int i = 0; i < kSensorCount; ++i) {
     gIdleMv[i] = static_cast<int>(sum[i] / kCalRounds);
   }
+}
+
+static void writeServo(bool southPresent) {
+  static int lastAngle = -1;
+  const int angle = southPresent ? 180 : 0;
+  if (angle == lastAngle) {
+    return;
+  }
+  lastAngle = angle;
+  const int pulseUs = southPresent ? kPulse180Us : kPulse0Us;
+  const uint32_t duty =
+      static_cast<uint32_t>(pulseUs) * ((1u << kServoBits) - 1) / kServoPeriodUs;
+  ledcWrite(kServoChannel, duty);
 }
 
 static void setLamp(Lamp lamp) {
@@ -100,6 +122,10 @@ void setup() {
   analogReadResolution(12);
   analogSetPinAttenuation(kZPin, ADC_11db);
 
+  ledcSetup(kServoChannel, 50, kServoBits);
+  ledcAttachPin(kServoPin, kServoChannel);
+  writeServo(false);
+
   Serial.begin(115200);
   Serial.println("Calibrating. Keep magnets away.");
   calibrateIdle();
@@ -135,6 +161,7 @@ void loop() {
     lampName = "blink";
   }
   setLamp(lamp);
+  writeServo(anySouth);
 
   for (int i = 0; i < kSensorCount; ++i) {
     const int delta = mv[i] - gIdleMv[i];
@@ -146,7 +173,7 @@ void loop() {
     }
     Serial.print(i + 1 < kSensorCount ? "  " : "");
   }
-  Serial.printf("  -> %s\n", lampName);
+  Serial.printf("  -> %s servo%d\n", lampName, anySouth ? 180 : 0);
 
   delay(200);
 }
