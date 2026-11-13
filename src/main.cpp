@@ -1,10 +1,13 @@
 #include <Arduino.h>
+#include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <AudioFileSourcePROGMEM.h>
 #include <AudioGeneratorMP3.h>
 #include <AudioOutputI2S.h>
+#include <MFRC522.h>
+#include <driver/i2s.h>
 
 #include "crossing_mp3.h"
 
@@ -27,10 +30,17 @@
 // VIN -> red 5V, GND -> black G. Leave GAIN and SD empty.
 // The speaker connects to the module's speaker terminals.
 // While any S is present the 4 second crossing clip loops.
+// A card tap interrupts it with one error or octopus beep, then the loop resumes.
 //
 // 0.96 inch SSD1306, 128x64, I2C. Wired as plugged on the top-right header:
 //   VCC -> VCC, GND -> GND, SCL -> D21, SDA -> D22.
-// S present draws X. N present draws a tick mark. Neither leaves the screen blank.
+// S present draws a cross. N present draws a tick. Neither leaves the screen blank.
+//
+// RC522, powered at 3.3V only. The red VCC rail is 5V, so do not use it.
+//   3.3V -> 3V3, GND -> black G, RST -> yellow 16, SDA -> yellow 5,
+//   SCK -> yellow 17, MOSI -> yellow 23, MISO -> yellow 19. IRQ stays empty.
+// A tap uses the sensor with the largest swing. S shows -$2.0 and the error
+// clip. N shows +$2.0 and the octopus beep.
 
 static constexpr int kMosPin = 18;
 static constexpr int kZPin = 34;
@@ -60,6 +70,13 @@ static constexpr int kSclPin = 21;
 static constexpr int kScreenWidth = 128;
 static constexpr int kScreenHeight = 64;
 static constexpr uint8_t kScreenAddr = 0x3C;
+static constexpr int kRfidSsPin = 5;
+static constexpr int kRfidRstPin = 16;
+static constexpr int kRfidSckPin = 17;
+static constexpr int kRfidMosiPin = 23;
+static constexpr int kRfidMisoPin = 19;
+static constexpr uint32_t kFareMs = 2200;
+static constexpr uint32_t kCardGoneMs = 800;
 
 enum class Lamp : uint8_t { Off, Solid, Blink };
 
@@ -68,13 +85,33 @@ static Lamp gLamp = Lamp::Off;
 static const char *gLampName = "off";
 static bool gAnySouth = false;
 
-static AudioOutputI2S *gOut = nullptr;
+enum class Clip : uint8_t { None, Crossing, Error, Octopus };
+
+class HeldOutput : public AudioOutputI2S {
+ public:
+  bool stop() override {
+    if (!i2sOn) {
+      return false;
+    }
+    i2s_zero_dma_buffer(static_cast<i2s_port_t>(portNo));
+    return true;
+  }
+};
+
+static HeldOutput *gOut = nullptr;
 static AudioFileSourcePROGMEM *gFile = nullptr;
 static AudioGeneratorMP3 *gMp3 = nullptr;
 static bool gSoundOn = false;
+static Clip gClip = Clip::None;
 static uint32_t gNextStartMs = 0;
 static Adafruit_SSD1306 gDisplay(kScreenWidth, kScreenHeight, &Wire, -1);
 static bool gDisplayOk = false;
+static MFRC522 gRfid(kRfidSsPin, kRfidRstPin);
+static bool gRfidOk = false;
+static int gPay = 0;
+static uint32_t gPayUntil = 0;
+static bool gCardHeld = false;
+static uint32_t gLastCardMs = 0;
 
 static void selectChannel(int channel) {
   digitalWrite(kS0Pin, channel & 0x1);
@@ -173,19 +210,49 @@ static void initDisplay() {
   gDisplay.display();
 }
 
+static void drawFare(const char *text) {
+  const int size = 3;
+  const int width = static_cast<int>(strlen(text)) * 6 * size;
+  const int height = 8 * size;
+  const int left = (kScreenWidth - width) / 2;
+  const int top = (kScreenHeight - height) / 2;
+  gDisplay.setTextSize(size);
+  gDisplay.setTextColor(SSD1306_WHITE);
+  gDisplay.setCursor(left < 0 ? 0 : left, top < 0 ? 0 : top);
+  gDisplay.print(text);
+}
+
+static bool paymentActive() {
+  return gClip == Clip::Error || gClip == Clip::Octopus;
+}
+
 static void showPoles(bool north, bool south) {
   if (!gDisplayOk) {
     return;
   }
+  const uint32_t now = millis();
+  if (gPay != 0 && static_cast<int32_t>(now - gPayUntil) >= 0 && !paymentActive()) {
+    gPay = 0;
+  }
+
   static int shown = -1;
-  const int mark = (north ? 2 : 0) | (south ? 1 : 0);
+  int mark = (north ? 2 : 0) | (south ? 1 : 0);
+  if (gPay > 0) {
+    mark = 8;
+  } else if (gPay < 0) {
+    mark = 16;
+  }
   if (mark == shown) {
     return;
   }
   shown = mark;
 
   gDisplay.clearDisplay();
-  if (south && north) {
+  if (gPay > 0) {
+    drawFare("+$2.0");
+  } else if (gPay < 0) {
+    drawFare("-$2.0");
+  } else if (south && north) {
     drawCross(34, 4, 94, 28, 2);
     drawTick(40, 42, 56, 58, 92, 34, 2);
   } else if (south) {
@@ -197,7 +264,7 @@ static void showPoles(bool north, bool south) {
 }
 
 static void initSound() {
-  gOut = new AudioOutputI2S();
+  gOut = new HeldOutput();
   gFile = new AudioFileSourcePROGMEM(kCrossingMp3, kCrossingMp3Len);
   const int bytes = AudioGeneratorMP3::preAllocSize();
   void *space = malloc(bytes);
@@ -211,28 +278,38 @@ static void initSound() {
   gOut->SetOutputModeMono(true);
 }
 
-static bool startSound() {
+static bool beginClip(const uint8_t *data, unsigned len, Clip clip) {
   if (gOut == nullptr || gFile == nullptr || gMp3 == nullptr) {
     return false;
   }
-  if (gMp3->isRunning()) {
-    return true;
-  }
   const uint32_t now = millis();
-  if (static_cast<int32_t>(now - gNextStartMs) < 0) {
+  if (clip == Clip::Crossing && static_cast<int32_t>(now - gNextStartMs) < 0) {
     return false;
   }
-  if (!gFile->isOpen()) {
-    gFile->open(kCrossingMp3, kCrossingMp3Len);
-  } else {
-    gFile->seek(0, SEEK_SET);
+  if (gMp3->isRunning()) {
+    gMp3->stop();
+  }
+  if (!gFile->open(data, static_cast<uint32_t>(len))) {
+    gSoundOn = false;
+    gClip = Clip::None;
+    return false;
   }
   gSoundOn = gMp3->begin(gFile, gOut);
   if (!gSoundOn) {
     gNextStartMs = now + 1000;
+    gClip = Clip::None;
     Serial.println("sound begin failed");
+    return false;
   }
-  return gSoundOn;
+  gClip = clip;
+  return true;
+}
+
+static bool startSound() {
+  if (gClip == Clip::Crossing && gMp3 != nullptr && gMp3->isRunning()) {
+    return true;
+  }
+  return beginClip(kCrossingMp3, kCrossingMp3Len, Clip::Crossing);
 }
 
 static void stopSound() {
@@ -243,19 +320,94 @@ static void stopSound() {
 }
 
 static void serviceSound(bool want) {
+  if (paymentActive()) {
+    if (gMp3 != nullptr && gMp3->isRunning() && gMp3->loop()) {
+      return;
+    }
+    stopSound();
+    gClip = Clip::None;
+  }
   if (!want) {
-    if (gSoundOn) {
+    if (gSoundOn || gClip == Clip::Crossing) {
       stopSound();
+      gClip = Clip::None;
     }
     return;
   }
-  if (!gSoundOn || gMp3 == nullptr || !gMp3->isRunning()) {
+  if (gClip != Clip::Crossing || !gSoundOn || gMp3 == nullptr || !gMp3->isRunning()) {
     startSound();
     return;
   }
   if (!gMp3->loop()) {
     stopSound();
+    gClip = Clip::None;
     startSound();
+  }
+}
+
+static void initRfid() {
+  SPI.begin(kRfidSckPin, kRfidMisoPin, kRfidMosiPin, kRfidSsPin);
+  gRfid.PCD_Init();
+  const byte version = gRfid.PCD_ReadRegister(MFRC522::VersionReg);
+  gRfidOk = version != 0x00 && version != 0xFF;
+  Serial.printf("rfid %s 0x%02x\n", gRfidOk ? "ok" : "fail", version);
+}
+
+static int nearestPole(const int *mv) {
+  int best = -1;
+  int bestAbs = kDeltaMv - 1;
+  for (int i = 0; i < kSensorCount; ++i) {
+    const int delta = mv[i] - gIdleMv[i];
+    const int magnitude = delta < 0 ? -delta : delta;
+    if (magnitude > bestAbs) {
+      bestAbs = magnitude;
+      best = i;
+    }
+  }
+  if (best < 0) {
+    return 0;
+  }
+  const int delta = mv[best] - gIdleMv[best];
+  if (delta <= -kDeltaMv) {
+    return 1;
+  }
+  if (delta >= kDeltaMv) {
+    return -1;
+  }
+  return 0;
+}
+
+static void pollCard(const int *mv, uint32_t now) {
+  if (!gRfidOk) {
+    return;
+  }
+  const bool seen = gRfid.PICC_IsNewCardPresent() && gRfid.PICC_ReadCardSerial();
+  if (seen) {
+    gRfid.PICC_HaltA();
+    gRfid.PCD_StopCrypto1();
+    gLastCardMs = now;
+    if (gCardHeld) {
+      return;
+    }
+    gCardHeld = true;
+    const int pole = nearestPole(mv);
+    if (pole == 0) {
+      Serial.println("card no pole");
+      return;
+    }
+    gPay = pole;
+    gPayUntil = now + kFareMs;
+    if (pole > 0) {
+      beginClip(kOctopusMp3, kOctopusMp3Len, Clip::Octopus);
+      Serial.println("card N +$2.0");
+    } else {
+      beginClip(kErrorMp3, kErrorMp3Len, Clip::Error);
+      Serial.println("card S -$2.0");
+    }
+    return;
+  }
+  if (gCardHeld && now - gLastCardMs >= kCardGoneMs) {
+    gCardHeld = false;
   }
 }
 
@@ -282,6 +434,7 @@ void setup() {
 
   Serial.begin(115200);
   initDisplay();
+  initRfid();
   Serial.println("Calibrating. Keep magnets away.");
   calibrateIdle();
   initSound();
@@ -322,6 +475,7 @@ void loop() {
       gLampName = "blink";
     }
     writeServo(gAnySouth);
+    pollCard(mv, now);
     serviceSound(gAnySouth);
     showPoles(anyNorth, gAnySouth);
 
@@ -335,8 +489,9 @@ void loop() {
       }
       Serial.print(i + 1 < kSensorCount ? "  " : "");
     }
-    Serial.printf("  -> %s servo%d%s\n", gLampName, gAnySouth ? 180 : 0,
-                  gSoundOn ? " snd" : "");
+    Serial.printf("  -> %s servo%d%s%s\n", gLampName, gAnySouth ? 180 : 0,
+                  gSoundOn ? " snd" : "",
+                  gPay > 0 ? " +$2.0" : (gPay < 0 ? " -$2.0" : ""));
   }
 
   setLamp(gLamp);
