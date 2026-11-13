@@ -7,7 +7,6 @@
 #include <AudioGeneratorMP3.h>
 #include <AudioOutputI2S.h>
 #include <MFRC522.h>
-#include <driver/i2s.h>
 
 #include "crossing_mp3.h"
 
@@ -78,6 +77,7 @@ static constexpr int kRfidMosiPin = 23;
 static constexpr int kRfidMisoPin = 19;
 static constexpr uint32_t kFareMs = 2200;
 static constexpr uint32_t kCardGoneMs = 800;
+static constexpr uint32_t kCardPollMs = 40;
 
 enum class Lamp : uint8_t { Off, Solid, Blink };
 
@@ -90,12 +90,10 @@ enum class Clip : uint8_t { None, Crossing, Error, Octopus };
 
 class HeldOutput : public AudioOutputI2S {
  public:
+  HeldOutput() : AudioOutputI2S(0, EXTERNAL_I2S, 32, APLL_DISABLE) {}
+
   bool stop() override {
-    if (!i2sOn) {
-      return false;
-    }
-    i2s_zero_dma_buffer(static_cast<i2s_port_t>(portNo));
-    return true;
+    return i2sOn;
   }
 };
 
@@ -122,8 +120,15 @@ static void selectChannel(int channel) {
   digitalWrite(kS2Pin, (channel >> 2) & 0x1);
 }
 
+static void feedAudio() {
+  if (gMp3 != nullptr && gMp3->isRunning()) {
+    gMp3->loop();
+  }
+}
+
 static int readChannelMv(int channel) {
   selectChannel(channel);
+  feedAudio();
   delayMicroseconds(800);
   analogRead(kZPin);
 
@@ -305,6 +310,7 @@ static bool beginClip(const uint8_t *data, unsigned len, Clip clip) {
     return false;
   }
   gClip = clip;
+  feedAudio();
   return true;
 }
 
@@ -463,7 +469,14 @@ void setup() {
 
 void loop() {
   static uint32_t lastScanMs = 0;
+  static uint32_t lastCardMs = 0;
   const uint32_t now = millis();
+
+  if (now - lastCardMs >= kCardPollMs) {
+    lastCardMs = now;
+    pollCard(now);
+    feedAudio();
+  }
 
   if (now - lastScanMs >= kScanMs) {
     lastScanMs = now;
@@ -492,7 +505,7 @@ void loop() {
     }
     writeServo(gAnySouth);
     rememberPole(mv);
-    pollCard(now);
+    feedAudio();
     serviceSound(gAnySouth);
     showPoles(anyNorth, gAnySouth);
 
@@ -513,5 +526,6 @@ void loop() {
   }
 
   setLamp(gLamp);
+  feedAudio();
   serviceSound(gAnySouth);
 }
