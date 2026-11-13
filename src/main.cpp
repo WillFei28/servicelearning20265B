@@ -30,7 +30,7 @@
 //
 // 0.96 inch SSD1306, 128x64, I2C. Wired as plugged on the top-right header:
 //   VCC -> VCC, GND -> GND, SCL -> D21, SDA -> D22.
-// S present draws X. N present draws TICK. Neither leaves the screen blank.
+// S present draws X. N present draws a tick mark. Neither leaves the screen blank.
 
 static constexpr int kMosPin = 18;
 static constexpr int kZPin = 34;
@@ -150,6 +150,21 @@ static void drawCentered(const char *text, int size, int top) {
   gDisplay.print(text);
 }
 
+static void drawBoldLine(int x0, int y0, int x1, int y1, int radius) {
+  for (int dy = -radius; dy <= radius; ++dy) {
+    for (int dx = -radius; dx <= radius; ++dx) {
+      if (dx * dx + dy * dy <= radius * radius) {
+        gDisplay.drawLine(x0 + dx, y0 + dy, x1 + dx, y1 + dy, SSD1306_WHITE);
+      }
+    }
+  }
+}
+
+static void drawTick(int x0, int y0, int x1, int y1, int x2, int y2, int radius) {
+  drawBoldLine(x0, y0, x1, y1, radius);
+  drawBoldLine(x1, y1, x2, y2, radius);
+}
+
 static void initDisplay() {
   Wire.begin(kSdaPin, kSclPin);
   gDisplayOk = gDisplay.begin(SSD1306_SWITCHCAPVCC, kScreenAddr);
@@ -176,12 +191,12 @@ static void showPoles(bool north, bool south) {
   gDisplay.setTextColor(SSD1306_WHITE);
   gDisplay.setTextWrap(false);
   if (south && north) {
-    drawCentered("X", 3, 6);
-    drawCentered("TICK", 2, 40);
+    drawCentered("X", 3, 4);
+    drawTick(40, 42, 56, 58, 92, 34, 2);
   } else if (south) {
     drawCentered("X", 5, 12);
   } else if (north) {
-    drawCentered("TICK", 3, 20);
+    drawTick(30, 34, 54, 56, 102, 10, 3);
   }
   gDisplay.display();
 }
