@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <AudioFileSourcePROGMEM.h>
 #include <AudioGeneratorMP3.h>
 #include <AudioOutputI2S.h>
 
@@ -21,8 +22,8 @@
 //
 // MAX98357A: LRC -> yellow 33, BCLK -> yellow 25, DIN -> yellow 26.
 // VIN -> red 5V, GND -> black G. Speaker on the module's speaker terminals.
-// GAIN -> black G, so the gain stays at 15 dB instead of wandering.
-// SD -> red 5V, so the amp cannot drift into shutdown.
+// GAIN -> black G locks the gain. Do not tie SD to G: that shuts the amp off.
+// SD can stay empty, or go to red 5V.
 // While any S is present the crossing clip loops without reopening I2S.
 
 static constexpr int kMosPin = 18;
@@ -48,75 +49,28 @@ static constexpr int kPulse180Us = 2400;
 static constexpr int kLrcPin = 33;
 static constexpr int kBclkPin = 25;
 static constexpr int kDinPin = 26;
-static constexpr int kI2sBuffers = 16;
 
-// Reads the clip forever. Stopping and reopening I2S at each loop end
-// drops the DMA buffer and the speaker dips every four seconds.
-class LoopingMp3Source : public AudioFileSource {
+// Same reader as the build that produced sound. At the end of the clip,
+// read() continues from the first byte so I2S is not torn down.
+class LoopingMp3Source : public AudioFileSourcePROGMEM {
  public:
   LoopingMp3Source(const uint8_t *data, uint32_t len)
-      : data_(data), len_(len), pos_(0), open_(true) {}
-
-  bool open(const char *filename) override {
-    (void)filename;
-    pos_ = 0;
-    open_ = true;
-    return true;
-  }
+      : AudioFileSourcePROGMEM(data, len) {}
 
   uint32_t read(void *dst, uint32_t len) override {
-    if (!open_ || data_ == nullptr || len_ == 0 || len == 0) {
+    if (len == 0) {
       return 0;
     }
     auto *out = static_cast<uint8_t *>(dst);
-    uint32_t written = 0;
-    while (written < len) {
-      if (pos_ >= len_) {
-        pos_ = 0;
-      }
-      uint32_t n = len_ - pos_;
-      if (n > len - written) {
-        n = len - written;
-      }
-      memcpy(out + written, data_ + pos_, n);
-      pos_ += n;
-      written += n;
+    uint32_t got = AudioFileSourcePROGMEM::read(out, len);
+    if (got == len) {
+      return got;
     }
-    return written;
+    if (!seek(0, SEEK_SET)) {
+      return got;
+    }
+    return got + AudioFileSourcePROGMEM::read(out + got, len - got);
   }
-
-  bool seek(int32_t pos, int dir) override {
-    if (!open_) {
-      return false;
-    }
-    if (dir == SEEK_SET) {
-      pos_ = static_cast<uint32_t>(pos);
-    } else if (dir == SEEK_CUR) {
-      pos_ = pos_ + static_cast<uint32_t>(pos);
-    } else {
-      return false;
-    }
-    if (pos_ >= len_) {
-      pos_ = 0;
-    }
-    return true;
-  }
-
-  bool close() override {
-    open_ = false;
-    pos_ = 0;
-    return true;
-  }
-
-  bool isOpen() override { return open_; }
-  uint32_t getSize() override { return len_; }
-  uint32_t getPos() override { return pos_; }
-
- private:
-  const uint8_t *data_;
-  uint32_t len_;
-  uint32_t pos_;
-  bool open_;
 };
 
 enum class Lamp : uint8_t { Off, Solid, Blink };
@@ -199,8 +153,7 @@ static void setLamp(Lamp lamp) {
 }
 
 static void initSound() {
-  gOut = new AudioOutputI2S(0, AudioOutputI2S::EXTERNAL_I2S, kI2sBuffers,
-                            AudioOutputI2S::APLL_DISABLE);
+  gOut = new AudioOutputI2S();
   gFile = new LoopingMp3Source(kCrossingMp3, kCrossingMp3Len);
   const int bytes = AudioGeneratorMP3::preAllocSize();
   void *space = malloc(bytes);
@@ -226,7 +179,7 @@ static bool startSound() {
     return false;
   }
   if (!gFile->isOpen()) {
-    gFile->open(nullptr);
+    gFile->open(kCrossingMp3, kCrossingMp3Len);
   } else {
     gFile->seek(0, SEEK_SET);
   }
