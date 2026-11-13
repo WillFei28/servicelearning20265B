@@ -39,8 +39,9 @@
 // RC522, powered at 3.3V only. The red VCC rail is 5V, so do not use it.
 //   3.3V -> 3V3, GND -> black G, RST -> yellow 16, SDA -> yellow 5,
 //   SCK -> yellow 17, MOSI -> yellow 23, MISO -> yellow 19. IRQ stays empty.
-// A tap uses the sensor with the largest swing. S shows -$2.0 and the error
-// clip. N shows +$2.0 and the octopus beep.
+// The latest N or S stays saved after the magnet leaves. A tap uses that
+// saved record, then clears it. S shows -$2.0 and the error clip.
+// N shows +$2.0 and the octopus beep. No saved record does neither.
 
 static constexpr int kMosPin = 18;
 static constexpr int kZPin = 34;
@@ -108,6 +109,8 @@ static Adafruit_SSD1306 gDisplay(kScreenWidth, kScreenHeight, &Wire, -1);
 static bool gDisplayOk = false;
 static MFRC522 gRfid(kRfidSsPin, kRfidRstPin);
 static bool gRfidOk = false;
+static int gSavedPole = 0;
+static bool gAcceptPole = true;
 static int gPay = 0;
 static uint32_t gPayUntil = 0;
 static bool gCardHeld = false;
@@ -377,7 +380,18 @@ static int nearestPole(const int *mv) {
   return 0;
 }
 
-static void pollCard(const int *mv, uint32_t now) {
+static void rememberPole(const int *mv) {
+  const int pole = nearestPole(mv);
+  if (pole == 0) {
+    gAcceptPole = true;
+    return;
+  }
+  if (gAcceptPole) {
+    gSavedPole = pole;
+  }
+}
+
+static void pollCard(uint32_t now) {
   if (!gRfidOk) {
     return;
   }
@@ -390,19 +404,21 @@ static void pollCard(const int *mv, uint32_t now) {
       return;
     }
     gCardHeld = true;
-    const int pole = nearestPole(mv);
+    const int pole = gSavedPole;
+    gSavedPole = 0;
+    gAcceptPole = false;
     if (pole == 0) {
-      Serial.println("card no pole");
+      Serial.println("card no record");
       return;
     }
     gPay = pole;
     gPayUntil = now + kFareMs;
     if (pole > 0) {
       beginClip(kOctopusMp3, kOctopusMp3Len, Clip::Octopus);
-      Serial.println("card N +$2.0");
+      Serial.println("card N +$2.0 reset");
     } else {
       beginClip(kErrorMp3, kErrorMp3Len, Clip::Error);
-      Serial.println("card S -$2.0");
+      Serial.println("card S -$2.0 reset");
     }
     return;
   }
@@ -475,7 +491,8 @@ void loop() {
       gLampName = "blink";
     }
     writeServo(gAnySouth);
-    pollCard(mv, now);
+    rememberPole(mv);
+    pollCard(now);
     serviceSound(gAnySouth);
     showPoles(anyNorth, gAnySouth);
 
@@ -489,8 +506,9 @@ void loop() {
       }
       Serial.print(i + 1 < kSensorCount ? "  " : "");
     }
-    Serial.printf("  -> %s servo%d%s%s\n", gLampName, gAnySouth ? 180 : 0,
+    Serial.printf("  -> %s servo%d%s%s%s\n", gLampName, gAnySouth ? 180 : 0,
                   gSoundOn ? " snd" : "",
+                  gSavedPole > 0 ? " recN" : (gSavedPole < 0 ? " recS" : ""),
                   gPay > 0 ? " +$2.0" : (gPay < 0 ? " -$2.0" : ""));
   }
 
