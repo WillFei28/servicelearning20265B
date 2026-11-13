@@ -8,8 +8,9 @@
 //   Y0..Y6 -> 49E OUT 1..7.  Y7 unused.
 // Each 49E: VCC -> 3.3V, GND -> black G, marked face outward.
 //
-// No magnet on Z is about 1.65V. N pulls it down, S pulls it up.
-// Any N: strips stay on. No N but any S: blink twice a second. Otherwise off.
+// Each sensor is compared with its own idle voltage, taken at boot with
+// no magnet nearby. N is a drop, S is a rise. Idle levels differ per
+// channel, so a fixed threshold falsely treats the low channels as N.
 
 static constexpr int kMosPin = 18;
 static constexpr int kZPin = 34;
@@ -20,12 +21,14 @@ static constexpr int kSensorCount = 7;
 
 static constexpr int kAdcMax = 4095;
 static constexpr int kAdcFullScaleMv = 3300;
-static constexpr int kNorthMaxMv = 1200;
-static constexpr int kSouthMinMv = 2100;
+static constexpr int kDeltaMv = 250;
 static constexpr uint32_t kBlinkHalfMs = 250;
 static constexpr int kSamples = 8;
+static constexpr int kCalRounds = 16;
 
 enum class Lamp : uint8_t { Off, Solid, Blink };
+
+static int gIdleMv[kSensorCount];
 
 static void selectChannel(int channel) {
   digitalWrite(kS0Pin, channel & 0x1);
@@ -44,6 +47,18 @@ static int readChannelMv(int channel) {
     delayMicroseconds(80);
   }
   return static_cast<int>((sum / kSamples) * kAdcFullScaleMv / kAdcMax);
+}
+
+static void calibrateIdle() {
+  long sum[kSensorCount] = {};
+  for (int round = 0; round < kCalRounds; ++round) {
+    for (int i = 0; i < kSensorCount; ++i) {
+      sum[i] += readChannelMv(i);
+    }
+  }
+  for (int i = 0; i < kSensorCount; ++i) {
+    gIdleMv[i] = static_cast<int>(sum[i] / kCalRounds);
+  }
 }
 
 static void setLamp(Lamp lamp) {
@@ -69,7 +84,6 @@ static void setLamp(Lamp lamp) {
 }
 
 void setup() {
-  // GPIO12 is a boot strap. Drive it low before it can sit high.
   digitalWrite(kS2Pin, LOW);
   pinMode(kS2Pin, OUTPUT);
   digitalWrite(kS2Pin, LOW);
@@ -87,7 +101,13 @@ void setup() {
   analogSetPinAttenuation(kZPin, ADC_11db);
 
   Serial.begin(115200);
-  Serial.println("7x 49E via 74HC4051. N=solid, S=blink, idle=off");
+  Serial.println("Calibrating. Keep magnets away.");
+  calibrateIdle();
+  Serial.print("idle");
+  for (int i = 0; i < kSensorCount; ++i) {
+    Serial.printf(" %d:%d", i + 1, gIdleMv[i]);
+  }
+  Serial.println();
 }
 
 void loop() {
@@ -97,9 +117,10 @@ void loop() {
 
   for (int i = 0; i < kSensorCount; ++i) {
     mv[i] = readChannelMv(i);
-    if (mv[i] <= kNorthMaxMv) {
+    const int delta = mv[i] - gIdleMv[i];
+    if (delta <= -kDeltaMv) {
       anyNorth = true;
-    } else if (mv[i] >= kSouthMinMv) {
+    } else if (delta >= kDeltaMv) {
       anySouth = true;
     }
   }
@@ -116,15 +137,16 @@ void loop() {
   setLamp(lamp);
 
   for (int i = 0; i < kSensorCount; ++i) {
+    const int delta = mv[i] - gIdleMv[i];
     Serial.printf("%d:%d", i + 1, mv[i]);
-    if (mv[i] <= kNorthMaxMv) {
+    if (delta <= -kDeltaMv) {
       Serial.print("N");
-    } else if (mv[i] >= kSouthMinMv) {
+    } else if (delta >= kDeltaMv) {
       Serial.print("S");
     }
     Serial.print(i + 1 < kSensorCount ? "  " : "");
   }
   Serial.printf("  -> %s\n", lampName);
 
-  delay(50);
+  delay(200);
 }
