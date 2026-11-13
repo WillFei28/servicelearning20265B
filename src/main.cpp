@@ -22,9 +22,8 @@
 //
 // MAX98357A: LRC -> yellow 33, BCLK -> yellow 25, DIN -> yellow 26.
 // VIN -> red 5V, GND -> black G. Speaker on the module's speaker terminals.
-// GAIN -> black G locks the gain. Do not tie SD to G: that shuts the amp off.
-// SD can stay empty, or go to red 5V.
-// While any S is present the crossing clip loops without reopening I2S.
+// GAIN -> black G. Leave SD unconnected.
+// While any S is present the 4 second crossing clip loops.
 
 static constexpr int kMosPin = 18;
 static constexpr int kZPin = 34;
@@ -50,29 +49,6 @@ static constexpr int kLrcPin = 33;
 static constexpr int kBclkPin = 25;
 static constexpr int kDinPin = 26;
 
-// Same reader as the build that produced sound. At the end of the clip,
-// read() continues from the first byte so I2S is not torn down.
-class LoopingMp3Source : public AudioFileSourcePROGMEM {
- public:
-  LoopingMp3Source(const uint8_t *data, uint32_t len)
-      : AudioFileSourcePROGMEM(data, len) {}
-
-  uint32_t read(void *dst, uint32_t len) override {
-    if (len == 0) {
-      return 0;
-    }
-    auto *out = static_cast<uint8_t *>(dst);
-    uint32_t got = AudioFileSourcePROGMEM::read(out, len);
-    if (got == len) {
-      return got;
-    }
-    if (!seek(0, SEEK_SET)) {
-      return got;
-    }
-    return got + AudioFileSourcePROGMEM::read(out + got, len - got);
-  }
-};
-
 enum class Lamp : uint8_t { Off, Solid, Blink };
 
 static int gIdleMv[kSensorCount];
@@ -81,7 +57,7 @@ static const char *gLampName = "off";
 static bool gAnySouth = false;
 
 static AudioOutputI2S *gOut = nullptr;
-static LoopingMp3Source *gFile = nullptr;
+static AudioFileSourcePROGMEM *gFile = nullptr;
 static AudioGeneratorMP3 *gMp3 = nullptr;
 static bool gSoundOn = false;
 static uint32_t gNextStartMs = 0;
@@ -154,7 +130,7 @@ static void setLamp(Lamp lamp) {
 
 static void initSound() {
   gOut = new AudioOutputI2S();
-  gFile = new LoopingMp3Source(kCrossingMp3, kCrossingMp3Len);
+  gFile = new AudioFileSourcePROGMEM(kCrossingMp3, kCrossingMp3Len);
   const int bytes = AudioGeneratorMP3::preAllocSize();
   void *space = malloc(bytes);
   gMp3 = new AudioGeneratorMP3(space, bytes);
@@ -254,20 +230,18 @@ void loop() {
   if (now - lastScanMs >= kScanMs) {
     lastScanMs = now;
     bool anyNorth = false;
-    bool south = false;
+    gAnySouth = false;
     int mv[kSensorCount];
 
     for (int i = 0; i < kSensorCount; ++i) {
-      serviceSound(gAnySouth);
       mv[i] = readChannelMv(i);
       const int delta = mv[i] - gIdleMv[i];
       if (delta <= -kDeltaMv) {
         anyNorth = true;
       } else if (delta >= kDeltaMv) {
-        south = true;
+        gAnySouth = true;
       }
     }
-    gAnySouth = south;
 
     gLamp = Lamp::Off;
     gLampName = "off";
