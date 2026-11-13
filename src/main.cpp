@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <AudioFileSourcePROGMEM.h>
 #include <AudioGeneratorMP3.h>
 #include <AudioOutputI2S.h>
 
@@ -21,9 +20,10 @@
 // brown wire to black G. S present turns it to 180 degrees. Otherwise 0.
 //
 // MAX98357A: LRC -> yellow 33, BCLK -> yellow 25, DIN -> yellow 26.
-// VIN -> red 5V, GND -> black G. Leave GAIN and SD empty.
-// The speaker connects to the module's speaker terminals.
-// While any S is present the 4 second crossing clip loops.
+// VIN -> red 5V, GND -> black G. Speaker on the module's speaker terminals.
+// GAIN -> black G, so the gain stays at 15 dB instead of wandering.
+// SD -> red 5V, so the amp cannot drift into shutdown.
+// While any S is present the crossing clip loops without reopening I2S.
 
 static constexpr int kMosPin = 18;
 static constexpr int kZPin = 34;
@@ -48,6 +48,76 @@ static constexpr int kPulse180Us = 2400;
 static constexpr int kLrcPin = 33;
 static constexpr int kBclkPin = 25;
 static constexpr int kDinPin = 26;
+static constexpr int kI2sBuffers = 16;
+
+// Reads the clip forever. Stopping and reopening I2S at each loop end
+// drops the DMA buffer and the speaker dips every four seconds.
+class LoopingMp3Source : public AudioFileSource {
+ public:
+  LoopingMp3Source(const uint8_t *data, uint32_t len)
+      : data_(data), len_(len), pos_(0), open_(true) {}
+
+  bool open(const char *filename) override {
+    (void)filename;
+    pos_ = 0;
+    open_ = true;
+    return true;
+  }
+
+  uint32_t read(void *dst, uint32_t len) override {
+    if (!open_ || data_ == nullptr || len_ == 0 || len == 0) {
+      return 0;
+    }
+    auto *out = static_cast<uint8_t *>(dst);
+    uint32_t written = 0;
+    while (written < len) {
+      if (pos_ >= len_) {
+        pos_ = 0;
+      }
+      uint32_t n = len_ - pos_;
+      if (n > len - written) {
+        n = len - written;
+      }
+      memcpy(out + written, data_ + pos_, n);
+      pos_ += n;
+      written += n;
+    }
+    return written;
+  }
+
+  bool seek(int32_t pos, int dir) override {
+    if (!open_) {
+      return false;
+    }
+    if (dir == SEEK_SET) {
+      pos_ = static_cast<uint32_t>(pos);
+    } else if (dir == SEEK_CUR) {
+      pos_ = pos_ + static_cast<uint32_t>(pos);
+    } else {
+      return false;
+    }
+    if (pos_ >= len_) {
+      pos_ = 0;
+    }
+    return true;
+  }
+
+  bool close() override {
+    open_ = false;
+    pos_ = 0;
+    return true;
+  }
+
+  bool isOpen() override { return open_; }
+  uint32_t getSize() override { return len_; }
+  uint32_t getPos() override { return pos_; }
+
+ private:
+  const uint8_t *data_;
+  uint32_t len_;
+  uint32_t pos_;
+  bool open_;
+};
 
 enum class Lamp : uint8_t { Off, Solid, Blink };
 
@@ -57,7 +127,7 @@ static const char *gLampName = "off";
 static bool gAnySouth = false;
 
 static AudioOutputI2S *gOut = nullptr;
-static AudioFileSourcePROGMEM *gFile = nullptr;
+static LoopingMp3Source *gFile = nullptr;
 static AudioGeneratorMP3 *gMp3 = nullptr;
 static bool gSoundOn = false;
 static uint32_t gNextStartMs = 0;
@@ -129,8 +199,9 @@ static void setLamp(Lamp lamp) {
 }
 
 static void initSound() {
-  gOut = new AudioOutputI2S();
-  gFile = new AudioFileSourcePROGMEM(kCrossingMp3, kCrossingMp3Len);
+  gOut = new AudioOutputI2S(0, AudioOutputI2S::EXTERNAL_I2S, kI2sBuffers,
+                            AudioOutputI2S::APLL_DISABLE);
+  gFile = new LoopingMp3Source(kCrossingMp3, kCrossingMp3Len);
   const int bytes = AudioGeneratorMP3::preAllocSize();
   void *space = malloc(bytes);
   gMp3 = new AudioGeneratorMP3(space, bytes);
@@ -155,7 +226,7 @@ static bool startSound() {
     return false;
   }
   if (!gFile->isOpen()) {
-    gFile->open(kCrossingMp3, kCrossingMp3Len);
+    gFile->open(nullptr);
   } else {
     gFile->seek(0, SEEK_SET);
   }
@@ -230,18 +301,20 @@ void loop() {
   if (now - lastScanMs >= kScanMs) {
     lastScanMs = now;
     bool anyNorth = false;
-    gAnySouth = false;
+    bool south = false;
     int mv[kSensorCount];
 
     for (int i = 0; i < kSensorCount; ++i) {
+      serviceSound(gAnySouth);
       mv[i] = readChannelMv(i);
       const int delta = mv[i] - gIdleMv[i];
       if (delta <= -kDeltaMv) {
         anyNorth = true;
       } else if (delta >= kDeltaMv) {
-        gAnySouth = true;
+        south = true;
       }
     }
+    gAnySouth = south;
 
     gLamp = Lamp::Off;
     gLampName = "off";
