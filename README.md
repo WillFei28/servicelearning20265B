@@ -137,9 +137,9 @@ P34 同 P35 都只入唔出，所以 RST 唔可以放喺呢兩隻，亦唔可以
 
 | 檔案 | 何時播 | 而家大小 |
 | --- | --- | --- |
-| `audio/crossing.mp3` | 有 S 就循環播 | 50782 bytes |
-| `audio/error.mp3` | 拍卡，記錄是 S | 24451 bytes |
-| `audio/octopus.mp3` | 拍卡，記錄是 N | 24450 bytes |
+| `audio/crossing.mp3` | 有 S 就循環播 | 66830 bytes，約 3.6 秒 |
+| `audio/error.mp3` | 拍卡，記錄是 S | 6882 bytes，約 0.6 秒 |
+| `audio/octopus.mp3` | 拍卡，記錄是 N | 7404 bytes，約 0.5 秒 |
 
 換檔時：
 
