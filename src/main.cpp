@@ -28,9 +28,10 @@
 // no magnet nearby. N is a drop, S is a rise. Idle levels differ per
 // channel, so a fixed threshold falsely treats the low channels as N.
 //
-// SG90 on GPIO23. The expansion board prints this column as R23:
-// yellow R23, red 5V, black GND.
-// S present turns it to 180 degrees. Otherwise 0.
+// Two SG90 servos move together. The expansion board prints GPIO23 as R23:
+// yellow R23, red 5V, black GND. The second servo is yellow P5, red 5V, black GND.
+// S present turns both to 180 degrees. Otherwise both sit at 0.
+// GPIO5 is a strap pin, so it is left alone until setup attaches the servo.
 // GPIO32 is the RC522 reset. GPIO34 and GPIO35 are input-only.
 //
 // MAX98357A: LRC -> yellow 17, BCLK -> yellow 16, DIN -> yellow 4.
@@ -50,6 +51,9 @@
 // The latest N or S stays saved after the magnet leaves. A tap uses that
 // saved record, then clears it. S shows -$2.0 and the error clip.
 // N shows +$2.0 and the octopus beep. No saved record does neither.
+// The amp sags the Hall rails during a beep, and one low channel can look
+// like a new N. A new pole is ignored until the fare clip and the fare
+// message have both finished, and it must then hold for two scans.
 
 static constexpr int kMosPin = 18;
 static constexpr int kZPin = 35;
@@ -71,8 +75,11 @@ static constexpr uint32_t kScanMs = 200;
 static constexpr int kSamples = 8;
 static constexpr int kCalRounds = 16;
 static constexpr int kServoPin = 23;
+static constexpr int kServoPinB = 5;
 static constexpr int kServoChannel = 0;
+static constexpr int kServoChannelB = 1;
 static constexpr int kServoBits = 16;
+static constexpr int kPoleHoldScans = 2;
 static constexpr int kServoPeriodUs = 20000;
 static constexpr int kPulse0Us = 544;
 static constexpr int kPulse180Us = 2400;
@@ -177,6 +184,7 @@ static void writeServo(bool southPresent) {
   const uint32_t duty =
       static_cast<uint32_t>(pulseUs) * ((1u << kServoBits) - 1) / kServoPeriodUs;
   ledcWrite(kServoChannel, duty);
+  ledcWrite(kServoChannelB, duty);
 }
 
 static void setLamp(Lamp lamp) {
@@ -441,13 +449,38 @@ static int nearestPole(const int *mv) {
   return 0;
 }
 
-static void rememberPole(const int *mv) {
+static int gPoleStreak = 0;
+static int gPoleStreakCount = 0;
+
+static bool fareBusy(uint32_t now) {
+  if (paymentActive()) {
+    return true;
+  }
+  return gPay != 0 && static_cast<int32_t>(now - gPayUntil) < 0;
+}
+
+static void rememberPole(const int *mv, uint32_t now) {
+  if (fareBusy(now)) {
+    gPoleStreak = 0;
+    gPoleStreakCount = 0;
+    return;
+  }
   const int pole = nearestPole(mv);
   if (pole == 0) {
     gAcceptPole = true;
+    gPoleStreak = 0;
+    gPoleStreakCount = 0;
     return;
   }
-  if (gAcceptPole) {
+  if (pole == gPoleStreak) {
+    if (gPoleStreakCount < kPoleHoldScans) {
+      ++gPoleStreakCount;
+    }
+  } else {
+    gPoleStreak = pole;
+    gPoleStreakCount = 1;
+  }
+  if (gAcceptPole && gPoleStreakCount >= kPoleHoldScans) {
     gSavedPole = pole;
   }
 }
@@ -509,14 +542,16 @@ void setup() {
   analogSetPinAttenuation(kZPin, ADC_11db);
 
   ledcSetup(kServoChannel, 50, kServoBits);
+  ledcSetup(kServoChannelB, 50, kServoBits);
   ledcAttachPin(kServoPin, kServoChannel);
+  ledcAttachPin(kServoPinB, kServoChannelB);
   writeServo(false);
 
   Serial.begin(115200);
   delay(200);
-  Serial.printf("debug z%d s0%d s1%d s2%d rst%d servo%d bclk%d lrc%d din%d\n",
-                kZPin, kS0Pin, kS1Pin, kS2Pin, kRfidRstPin, kServoPin, kBclkPin,
-                kLrcPin, kDinPin);
+  Serial.printf("debug z%d s0%d s1%d s2%d rst%d servo%d+%d bclk%d lrc%d din%d\n",
+                kZPin, kS0Pin, kS1Pin, kS2Pin, kRfidRstPin, kServoPin, kServoPinB,
+                kBclkPin, kLrcPin, kDinPin);
   initDisplay();
   initRfid();
   Serial.println("calibrating. keep magnets away");
@@ -576,7 +611,7 @@ void loop() {
       gLampName = "blink";
     }
     writeServo(gAnySouth);
-    rememberPole(mv);
+    rememberPole(mv, now);
     feedAudio();
     serviceSound(gAnySouth);
     showPoles(anyNorth, gAnySouth);
