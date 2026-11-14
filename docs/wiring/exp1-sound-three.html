@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>EXP 1 接聲音</title>
+<style>
+  html, body { margin: 0; background: #f4f1ea; }
+  body {
+    width: 1440px; height: 980px; overflow: hidden;
+    font-family: "WenQuanYi Micro Hei", sans-serif; color: #1c1c1c;
+  }
+  header { height: 64px; padding: 14px 36px 0; box-sizing: border-box; }
+  h1 { margin: 0; font-size: 28px; display: inline; }
+  header p { display: inline; margin: 0 0 0 16px; color: #555; font-size: 16px; }
+  #view { width: 1440px; height: 820px; }
+  #view canvas { display: block; }
+  footer {
+    height: 96px; margin: 0 28px; background: #fff; border-radius: 12px;
+    display: flex; align-items: center; gap: 22px; padding: 0 24px;
+    font-size: 17px; box-sizing: border-box;
+  }
+  .g { color: #24963b; } .t { color: #0b8f9b; } .p { color: #d45386; } .r { color: #d42727; }
+  #err { position: absolute; left: 40px; top: 80px; color: #a40000; white-space: pre-wrap; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js"
+  }
+}
+</script>
+</head>
+<body>
+<header>
+  <h1>EXP 1　接聲音</h1>
+  <p>拖曳可以轉，滾輪可以放大。黃針係訊號。GAIN 同 SD 留空。</p>
+</header>
+<div id="view"></div>
+<footer>
+  <b>對名插</b>
+  <span>P26 黃針 <b class="g">綠線 → DIN</b></span>
+  <span>P25 黃針 <b class="t">青線 → BCLK</b></span>
+  <span>P33 黃針 <b class="p">粉紅線 → LRC</b></span>
+  <span><b class="r">紅針 5V → Vin</b></span>
+  <span><b>黑針 G → GND</b></span>
+</footer>
+<div id="err"></div>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "./vendor/OrbitControls.js";
+
+const view = document.querySelector("#view");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(1);
+renderer.setSize(1440, 820);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+view.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf4f1ea);
+
+const camera = new THREE.PerspectiveCamera(38, 1440 / 820, 0.1, 100);
+camera.position.set(13.5, 9.2, 13.2);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(4.2, 0.8, 0.2);
+controls.enableDamping = true;
+controls.update();
+
+scene.add(new THREE.HemisphereLight(0xfff6ea, 0xc8bfb2, 1.15));
+const sun = new THREE.DirectionalLight(0xffffff, 1.35);
+sun.position.set(8, 14, 6);
+scene.add(sun);
+
+const boardMat = new THREE.MeshStandardMaterial({ color: 0x6d4b96, roughness: 0.72 });
+const blackMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.55 });
+const goldMat = new THREE.MeshStandardMaterial({ color: 0xe4d29a, roughness: 0.4, metalness: 0.35 });
+const blueMat = new THREE.MeshStandardMaterial({ color: 0x1b6ca8, roughness: 0.55 });
+const chipMat = new THREE.MeshStandardMaterial({ color: 0x0e4e7c, roughness: 0.5 });
+
+function box(w, h, d, material, x, y, z) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+  mesh.position.set(x, y, z);
+  scene.add(mesh);
+  return mesh;
+}
+
+function plastic(color) {
+  return new THREE.MeshStandardMaterial({ color, roughness: 0.42 });
+}
+
+function label(text, x, y, z, color = "#1c1c1c", wide = 1.45) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 96;
+  const pen = canvas.getContext("2d");
+  pen.font = "600 54px 'WenQuanYi Micro Hei', sans-serif";
+  pen.fillStyle = color;
+  pen.textAlign = "center";
+  pen.textBaseline = "middle";
+  pen.fillText(text, 256, 50);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+  sprite.position.set(x, y, z);
+  sprite.scale.set(wide, wide * 96 / 512, 1);
+  scene.add(sprite);
+}
+
+function tube(points, color) {
+  const curve = new THREE.CatmullRomCurve3(points);
+  const mesh = new THREE.Mesh(
+    new THREE.TubeGeometry(curve, 40, 0.055, 8, false),
+    plastic(color)
+  );
+  scene.add(mesh);
+}
+
+box(9.6, 0.32, 12.4, boardMat, 0, 0.16, 0);
+box(3.1, 0.38, 4.6, blackMat, -1.5, 0.51, -0.4);
+box(1.15, 0.12, 0.28, new THREE.MeshStandardMaterial({ color: 0xc8c8c8 }), -1.5, 0.76, -2.35);
+box(2.1, 0.16, 0.9, goldMat, -1.5, 0.58, 1.35);
+label("ESP32", -1.5, 1.25, -0.2, "#f4f4f4", 1.3);
+label("擴展板", -3.4, 0.85, -5.6, "#ffffff", 1.5);
+
+const pins = [
+  { name: "P14", z: -4.4, head: 0xc6a84e },
+  { name: "P27", z: -3.5, head: 0xc6a84e },
+  { name: "P26", z: -2.5, head: 0xe6c83b, to: "DIN", color: 0x2ea043 },
+  { name: "P25", z: -1.6, head: 0xe6c83b, to: "BCLK", color: 0x0e9aa7 },
+  { name: "P33", z: -0.7, head: 0xe6c83b, to: "LRC", color: 0xd45386 },
+  { name: "P32", z: 0.2, head: 0xc6a84e },
+  { name: "P34", z: 1.1, head: 0xc6a84e },
+  { name: "5V", z: 2.3, head: 0xd42727, to: "Vin", color: 0xd42727 },
+  { name: "G", z: 3.3, head: 0x222222, to: "GND", color: 0x222222 }
+];
+
+box(4.8, 0.3, 8.6, blueMat, 9.4, 0.15, 0.2);
+box(1.5, 0.12, 1.1, chipMat, 9.6, 0.36, -0.6);
+box(0.55, 0.1, 0.55, blackMat, 9.6, 0.46, -0.6);
+label("MAX98357A", 10.6, 0.95, -3.7, "#1b6ca8", 2.1);
+
+const ampLeft = 7.0;
+for (const pin of pins) {
+  box(0.28, 0.28, 0.28, plastic(pin.head), 4.55, 0.46, pin.z);
+  const cap = pin.color ?? 0xcfcfcf;
+  box(0.22, 0.22, 0.22, plastic(cap), 5.05, 0.5, pin.z);
+  if (pin.to) label(pin.name, 2.7, 1.2, pin.z, "#ffffff", 1.2);
+  if (!pin.to) continue;
+  const start = new THREE.Vector3(5.2, 0.62, pin.z);
+  const end = new THREE.Vector3(ampLeft, 0.48, pin.z);
+  const mid = start.clone().lerp(end, 0.5);
+  mid.y = 1.15;
+  tube([start, mid, end], pin.color);
+  box(0.24, 0.24, 0.24, plastic(pin.color), ampLeft, 0.42, pin.z);
+  label(pin.to, 10.5, 0.7, pin.z, "#ffffff", 1.15);
+}
+
+box(0.22, 0.22, 0.22, plastic(0x8fb4cc), ampLeft, 0.42, 0.55);
+box(0.22, 0.22, 0.22, plastic(0x8fb4cc), ampLeft, 0.42, 1.45);
+label("GAIN 留空", 10.6, 0.7, 0.55, "#d6ebff", 1.35);
+label("SD 留空", 10.4, 0.7, 1.45, "#d6ebff", 1.2);
+
+const speakerBody = new THREE.Mesh(new THREE.BoxGeometry(2.3, 1.35, 0.7), blackMat);
+speakerBody.position.set(9.5, 2.55, -2.6);
+scene.add(speakerBody);
+const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.12, 24), plastic(0x111111));
+cone.rotation.x = Math.PI / 2;
+cone.position.set(9.5, 2.55, -2.22);
+scene.add(cone);
+label("8Ω 小喇叭", 9.5, 3.55, -2.6, "#1c1c1c", 1.7);
+
+for (const screw of [
+  { x: 8.9, color: 0xd42727 },
+  { x: 10.1, color: 0x222222 }
+]) {
+  const stud = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.08, 16), plastic(0xd9dde2));
+  stud.position.set(screw.x, 0.38, -2.6);
+  scene.add(stud);
+  tube([
+    new THREE.Vector3(screw.x, 1.85, -2.6),
+    new THREE.Vector3(screw.x, 1.1, -2.6),
+    new THREE.Vector3(screw.x, 0.48, -2.6)
+  ], screw.color);
+}
+
+window.addEventListener("error", (event) => {
+  document.querySelector("#err").textContent = String(event.message || event.error);
+});
+
+function frame() {
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>
