@@ -11,42 +11,57 @@
 #include "crossing_mp3.h"
 
 // Seven 49E Hall sensors through one 74HC4051. GPIO18 drives the MOS.
+// The expansion-board jumper is set to 5V, so every red pin is 5V.
 //
-// 74HC4051, powered at 3.3V:
-//   VCC -> 3.3V.  GND, VEE, E -> black G.
-//   S0 -> yellow 27, S1 -> yellow 14, S2 -> yellow 12, Z -> yellow 34.
-//   Y0..Y6 -> 49E OUT 1..7.  Y7 unused.
-// Each 49E: VCC -> 3.3V, GND -> black G, marked face outward.
+// 74HC4051, single 3.3V supply:
+//   VCC -> the 3.3V pin at the board edge.
+//   VEE -> GND directly under that 3.3V pin. VEE is not 3.3V.
+//   GND -> SD2 black.  E -> P27 black.  Y7 unused.
+//   S0 -> yellow 12, S1 -> yellow 14, S2 -> yellow 27, Z -> yellow 35.
+// GPIO13 is ADC2 and reads as 0 while other peripherals run, which
+// looks like a permanent north pole. GPIO35 is ADC1 and input-only.
+//   Y0..Y6 -> 49E OUT 1..7. Sensor VCC taps the 4051 VCC pin,
+//   sensor GND taps the 4051 GND pin. Marked face outward.
+// GPIO12 is a strap pin, so S0 is driven low before it becomes an output.
 //
 // Each sensor is compared with its own idle voltage, taken at boot with
 // no magnet nearby. N is a drop, S is a rise. Idle levels differ per
 // channel, so a fixed threshold falsely treats the low channels as N.
 //
-// SG90 on GPIO13: orange wire to yellow 13, red wire to a red 5V pin,
-// brown wire to black G. S present turns it to 180 degrees. Otherwise 0.
+// Two SG90 servos move together. The expansion board prints GPIO23 as R23:
+// yellow R23, red 5V, black GND. The second servo is yellow P5, red 5V, black GND.
+// S present turns both to 180 degrees. Otherwise both sit at 0.
+// GPIO5 is a strap pin, so it is left alone until setup attaches the servo.
+// GPIO32 is the RC522 reset. GPIO34 and GPIO35 are input-only.
 //
-// MAX98357A: LRC -> yellow 33, BCLK -> yellow 25, DIN -> yellow 26.
-// VIN -> red 5V, GND -> black G. Leave GAIN and SD empty.
-// The speaker connects to the module's speaker terminals.
-// While any S is present the 4 second crossing clip loops.
+// MAX98357A: LRC -> yellow 17, BCLK -> yellow 16, DIN -> yellow 4.
+// VIN -> P4 red, GND -> P4 black. Leave GAIN and SD empty.
+// While any S is present the crossing clip loops.
 // A card tap interrupts it with one error or octopus beep, then the loop resumes.
 //
-// 0.96 inch SSD1306, 128x64, I2C. Wired as plugged on the top-right header:
+// 0.96 inch SSD1306, 128x64, I2C, unchanged:
 //   VCC -> VCC, GND -> GND, SCL -> D21, SDA -> D22.
 // S present draws a cross. N present draws a tick. Neither leaves the screen blank.
 //
-// RC522, powered at 3.3V only. The red VCC rail is 5V, so do not use it.
-//   3.3V -> 3V3, GND -> black G, RST -> yellow 16, SDA -> yellow 5,
-//   SCK -> yellow 17, MOSI -> yellow 23, MISO -> yellow 19. IRQ stays empty.
+// RC522, 3.3V only. Do not use a red 5V pin.
+//   3.3V -> the middle 3.3V pin. GND -> black under that pin.
+//   Both 3.3V pins are taken, so RST is GPIO32.
+//   SDA -> yellow 26, SCK -> yellow 33, MOSI -> yellow 25, MISO -> yellow 34.
+//   IRQ stays empty. P35 yellow is the Hall Z input, not a reader pin.
 // The latest N or S stays saved after the magnet leaves. A tap uses that
 // saved record, then clears it. S shows -$2.0 and the error clip.
 // N shows +$2.0 and the octopus beep. No saved record does neither.
 
 static constexpr int kMosPin = 18;
-static constexpr int kZPin = 34;
-static constexpr int kS0Pin = 27;
+static constexpr int kZPin = 35;
+static constexpr int kMinSenseMv = 400;
+static constexpr int kMaxSenseMv = 3000;
+static constexpr int kMinIdleMv = 900;
+static constexpr int kMaxIdleMv = 2400;
+static constexpr int kStableMv = 80;
+static constexpr int kS0Pin = 12;
 static constexpr int kS1Pin = 14;
-static constexpr int kS2Pin = 12;
+static constexpr int kS2Pin = 27;
 static constexpr int kSensorCount = 7;
 
 static constexpr int kAdcMax = 4095;
@@ -56,25 +71,27 @@ static constexpr uint32_t kBlinkHalfMs = 250;
 static constexpr uint32_t kScanMs = 200;
 static constexpr int kSamples = 8;
 static constexpr int kCalRounds = 16;
-static constexpr int kServoPin = 13;
+static constexpr int kServoPin = 23;
+static constexpr int kServoPinB = 5;
 static constexpr int kServoChannel = 0;
+static constexpr int kServoChannelB = 1;
 static constexpr int kServoBits = 16;
 static constexpr int kServoPeriodUs = 20000;
 static constexpr int kPulse0Us = 544;
 static constexpr int kPulse180Us = 2400;
-static constexpr int kLrcPin = 33;
-static constexpr int kBclkPin = 25;
-static constexpr int kDinPin = 26;
+static constexpr int kLrcPin = 17;
+static constexpr int kBclkPin = 16;
+static constexpr int kDinPin = 4;
 static constexpr int kSdaPin = 22;
 static constexpr int kSclPin = 21;
 static constexpr int kScreenWidth = 128;
 static constexpr int kScreenHeight = 64;
 static constexpr uint8_t kScreenAddr = 0x3C;
-static constexpr int kRfidSsPin = 5;
-static constexpr int kRfidRstPin = 16;
-static constexpr int kRfidSckPin = 17;
-static constexpr int kRfidMosiPin = 23;
-static constexpr int kRfidMisoPin = 19;
+static constexpr int kRfidSsPin = 26;
+static constexpr int kRfidRstPin = 32;
+static constexpr int kRfidSckPin = 33;
+static constexpr int kRfidMosiPin = 25;
+static constexpr int kRfidMisoPin = 34;
 static constexpr uint32_t kFareMs = 2200;
 static constexpr uint32_t kCardGoneMs = 800;
 static constexpr uint32_t kCardPollMs = 40;
@@ -163,6 +180,7 @@ static void writeServo(bool southPresent) {
   const uint32_t duty =
       static_cast<uint32_t>(pulseUs) * ((1u << kServoBits) - 1) / kServoPeriodUs;
   ledcWrite(kServoChannel, duty);
+  ledcWrite(kServoChannelB, duty);
 }
 
 static void setLamp(Lamp lamp) {
@@ -209,9 +227,24 @@ static void drawCross(int left, int top, int right, int bottom, int radius) {
 
 static void initDisplay() {
   Wire.begin(kSdaPin, kSclPin);
+  Serial.print("i2c");
+  int found = 0;
+  for (uint8_t addr = 1; addr < 127; ++addr) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf(" 0x%02x", addr);
+      ++found;
+    }
+  }
+  if (found == 0) {
+    Serial.print(" none");
+  }
+  Serial.println();
+
   gDisplayOk = gDisplay.begin(SSD1306_SWITCHCAPVCC, kScreenAddr);
+  Serial.printf("display %s sda%d scl%d addr0x%02x\n", gDisplayOk ? "ok" : "FAIL",
+                kSdaPin, kSclPin, kScreenAddr);
   if (!gDisplayOk) {
-    Serial.println("display begin failed");
     return;
   }
   gDisplay.clearDisplay();
@@ -284,6 +317,7 @@ static void initSound() {
   gOut->SetPinout(kBclkPin, kLrcPin, kDinPin);
   gOut->SetGain(0.7);
   gOut->SetOutputModeMono(true);
+  Serial.printf("sound ready bclk%d lrc%d din%d\n", kBclkPin, kLrcPin, kDinPin);
 }
 
 static bool beginClip(const uint8_t *data, unsigned len, Clip clip) {
@@ -355,17 +389,42 @@ static void serviceSound(bool want) {
 }
 
 static void initRfid() {
+  pinMode(kRfidRstPin, OUTPUT);
+  digitalWrite(kRfidRstPin, HIGH);
   SPI.begin(kRfidSckPin, kRfidMisoPin, kRfidMosiPin, kRfidSsPin);
   gRfid.PCD_Init();
+  digitalWrite(kRfidRstPin, HIGH);
   const byte version = gRfid.PCD_ReadRegister(MFRC522::VersionReg);
   gRfidOk = version != 0x00 && version != 0xFF;
   Serial.printf("rfid %s 0x%02x\n", gRfidOk ? "ok" : "fail", version);
+}
+
+static int gLastMv[kSensorCount];
+static bool gHaveLast = false;
+
+static bool senseLive(int mv) {
+  return mv >= kMinSenseMv && mv <= kMaxSenseMv;
+}
+
+static bool idleLive(int mv) {
+  return mv >= kMinIdleMv && mv <= kMaxIdleMv;
+}
+
+static bool readingStable(int channel, int mv) {
+  if (!gHaveLast) {
+    return false;
+  }
+  const int delta = mv - gLastMv[channel];
+  return delta <= kStableMv && delta >= -kStableMv;
 }
 
 static int nearestPole(const int *mv) {
   int best = -1;
   int bestAbs = kDeltaMv - 1;
   for (int i = 0; i < kSensorCount; ++i) {
+    if (!idleLive(gIdleMv[i]) || !senseLive(mv[i]) || !readingStable(i, mv[i])) {
+      continue;
+    }
     const int delta = mv[i] - gIdleMv[i];
     const int magnitude = delta < 0 ? -delta : delta;
     if (magnitude > bestAbs) {
@@ -434,14 +493,17 @@ static void pollCard(uint32_t now) {
 }
 
 void setup() {
-  digitalWrite(kS2Pin, LOW);
-  pinMode(kS2Pin, OUTPUT);
-  digitalWrite(kS2Pin, LOW);
-
+  // GPIO12 (S0) chooses the flash voltage if it is high at boot.
   digitalWrite(kS0Pin, LOW);
-  digitalWrite(kS1Pin, LOW);
   pinMode(kS0Pin, OUTPUT);
+  digitalWrite(kS0Pin, LOW);
+
+  digitalWrite(kS1Pin, LOW);
+  digitalWrite(kS2Pin, LOW);
   pinMode(kS1Pin, OUTPUT);
+  pinMode(kS2Pin, OUTPUT);
+  digitalWrite(kS1Pin, LOW);
+  digitalWrite(kS2Pin, LOW);
 
   digitalWrite(kMosPin, LOW);
   pinMode(kMosPin, OUTPUT);
@@ -451,20 +513,33 @@ void setup() {
   analogSetPinAttenuation(kZPin, ADC_11db);
 
   ledcSetup(kServoChannel, 50, kServoBits);
+  ledcSetup(kServoChannelB, 50, kServoBits);
   ledcAttachPin(kServoPin, kServoChannel);
+  ledcAttachPin(kServoPinB, kServoChannelB);
   writeServo(false);
 
   Serial.begin(115200);
+  delay(200);
+  Serial.printf("debug z%d s0%d s1%d s2%d rst%d servo%d+%d bclk%d lrc%d din%d\n",
+                kZPin, kS0Pin, kS1Pin, kS2Pin, kRfidRstPin, kServoPin, kServoPinB,
+                kBclkPin, kLrcPin, kDinPin);
   initDisplay();
   initRfid();
-  Serial.println("Calibrating. Keep magnets away.");
+  Serial.println("calibrating. keep magnets away");
   calibrateIdle();
   initSound();
+  int dead = 0;
   Serial.print("idle");
   for (int i = 0; i < kSensorCount; ++i) {
     Serial.printf(" %d:%d", i + 1, gIdleMv[i]);
+    if (!idleLive(gIdleMv[i])) {
+      ++dead;
+    }
   }
   Serial.println();
+  if (dead == kSensorCount) {
+    Serial.println("hall idle out of range. powered 49E rests near 1600");
+  }
 }
 
 void loop() {
@@ -486,6 +561,9 @@ void loop() {
 
     for (int i = 0; i < kSensorCount; ++i) {
       mv[i] = readChannelMv(i);
+      if (!idleLive(gIdleMv[i]) || !senseLive(mv[i]) || !readingStable(i, mv[i])) {
+        continue;
+      }
       const int delta = mv[i] - gIdleMv[i];
       if (delta <= -kDeltaMv) {
         anyNorth = true;
@@ -512,6 +590,16 @@ void loop() {
     for (int i = 0; i < kSensorCount; ++i) {
       const int delta = mv[i] - gIdleMv[i];
       Serial.printf("%d:%d", i + 1, mv[i]);
+      if (!idleLive(gIdleMv[i]) || !senseLive(mv[i])) {
+        Serial.print("x");
+        Serial.print(i + 1 < kSensorCount ? "  " : "");
+        continue;
+      }
+      if (!readingStable(i, mv[i])) {
+        Serial.print("?");
+        Serial.print(i + 1 < kSensorCount ? "  " : "");
+        continue;
+      }
       if (delta <= -kDeltaMv) {
         Serial.print("N");
       } else if (delta >= kDeltaMv) {
@@ -519,6 +607,10 @@ void loop() {
       }
       Serial.print(i + 1 < kSensorCount ? "  " : "");
     }
+    for (int i = 0; i < kSensorCount; ++i) {
+      gLastMv[i] = mv[i];
+    }
+    gHaveLast = true;
     Serial.printf("  -> %s servo%d%s%s%s\n", gLampName, gAnySouth ? 180 : 0,
                   gSoundOn ? " snd" : "",
                   gSavedPole > 0 ? " recN" : (gSavedPole < 0 ? " recS" : ""),
