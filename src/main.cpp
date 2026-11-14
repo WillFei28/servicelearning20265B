@@ -41,8 +41,8 @@
 // S present draws a cross. N present draws a tick. Neither leaves the screen blank.
 //
 // RC522, 3.3V only. Do not use a red 5V pin.
-//   3.3V -> the middle 3.3V pin. GND -> black under that pin.
-//   RST is tied to that same 3.3V. P35 cannot drive RST.
+//   The board has one 3.3V pin. RC522 3.3V and RST share it with the 4051 VCC.
+//   GND -> P35 black. P35 yellow cannot drive RST, so that signal pin stays empty.
 //   SDA -> yellow 26, SCK -> yellow 33, MOSI -> yellow 25, MISO -> yellow 34.
 //   IRQ and P35 stay empty.
 // The latest N or S stays saved after the magnet leaves. A tap uses that
