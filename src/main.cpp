@@ -31,7 +31,7 @@
 // S present turns it to 180 degrees. Otherwise 0.
 // GPIO34 and GPIO35 are input-only, so the servo cannot use them.
 //
-// MAX98357A: LRC -> yellow 17, BCLK -> yellow 5, DIN -> yellow 4.
+// MAX98357A: LRC -> yellow 17, BCLK -> yellow 16, DIN -> yellow 4.
 // VIN -> P4 red, GND -> P4 black. Leave GAIN and SD empty.
 // While any S is present the crossing clip loops.
 // A card tap interrupts it with one error or octopus beep, then the loop resumes.
@@ -42,7 +42,7 @@
 //
 // RC522, 3.3V only. Do not use a red 5V pin.
 //   3.3V -> the middle 3.3V pin. GND -> black under that pin.
-//   Both 3.3V pins are taken, so RST returns to GPIO16.
+//   Both 3.3V pins are taken, so RST is GPIO23.
 //   SDA -> yellow 26, SCK -> yellow 33, MOSI -> yellow 25, MISO -> yellow 34.
 //   IRQ stays empty. P35 is input-only and stays empty.
 // The latest N or S stays saved after the magnet leaves. A tap uses that
@@ -70,7 +70,7 @@ static constexpr int kServoPeriodUs = 20000;
 static constexpr int kPulse0Us = 544;
 static constexpr int kPulse180Us = 2400;
 static constexpr int kLrcPin = 17;
-static constexpr int kBclkPin = 5;
+static constexpr int kBclkPin = 16;
 static constexpr int kDinPin = 4;
 static constexpr int kSdaPin = 22;
 static constexpr int kSclPin = 21;
@@ -78,7 +78,7 @@ static constexpr int kScreenWidth = 128;
 static constexpr int kScreenHeight = 64;
 static constexpr uint8_t kScreenAddr = 0x3C;
 static constexpr int kRfidSsPin = 26;
-static constexpr int kRfidRstPin = 16;
+static constexpr int kRfidRstPin = 23;
 static constexpr int kRfidSckPin = 33;
 static constexpr int kRfidMosiPin = 25;
 static constexpr int kRfidMisoPin = 34;
