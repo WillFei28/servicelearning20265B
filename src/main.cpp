@@ -17,11 +17,12 @@
 //   VCC -> the 3.3V pin at the board edge.
 //   VEE -> GND directly under that 3.3V pin. VEE is not 3.3V.
 //   GND -> SD2 black.  E -> P27 black.  Y7 unused.
-//   S0 -> yellow 12, S1 -> yellow 14, S2 -> yellow 27, Z -> yellow 13.
+//   S0 -> yellow 12, S1 -> yellow 14, S2 -> yellow 27, Z -> yellow 35.
+// GPIO13 is ADC2 and reads as 0 while other peripherals run, which
+// looks like a permanent north pole. GPIO35 is ADC1 and input-only.
 //   Y0..Y6 -> 49E OUT 1..7. Sensor VCC taps the 4051 VCC pin,
 //   sensor GND taps the 4051 GND pin. Marked face outward.
 // GPIO12 is a strap pin, so S0 is driven low before it becomes an output.
-// GPIO13 is ADC2. Wi-Fi is unused, so that analog read is available.
 //
 // Each sensor is compared with its own idle voltage, taken at boot with
 // no magnet nearby. N is a drop, S is a rise. Idle levels differ per
@@ -45,13 +46,14 @@
 //   3.3V -> the middle 3.3V pin. GND -> black under that pin.
 //   Both 3.3V pins are taken, so RST is GPIO32.
 //   SDA -> yellow 26, SCK -> yellow 33, MOSI -> yellow 25, MISO -> yellow 34.
-//   IRQ stays empty. P35 is input-only and stays empty.
+//   IRQ stays empty. P35 yellow is the Hall Z input, not a reader pin.
 // The latest N or S stays saved after the magnet leaves. A tap uses that
 // saved record, then clears it. S shows -$2.0 and the error clip.
 // N shows +$2.0 and the octopus beep. No saved record does neither.
 
 static constexpr int kMosPin = 18;
-static constexpr int kZPin = 13;
+static constexpr int kZPin = 35;
+static constexpr int kMinSenseMv = 100;
 static constexpr int kS0Pin = 12;
 static constexpr int kS1Pin = 14;
 static constexpr int kS2Pin = 27;
@@ -373,10 +375,17 @@ static void initRfid() {
   Serial.printf("rfid %s 0x%02x\n", gRfidOk ? "ok" : "fail", version);
 }
 
+static bool senseLive(int mv) {
+  return mv >= kMinSenseMv;
+}
+
 static int nearestPole(const int *mv) {
   int best = -1;
   int bestAbs = kDeltaMv - 1;
   for (int i = 0; i < kSensorCount; ++i) {
+    if (!senseLive(mv[i])) {
+      continue;
+    }
     const int delta = mv[i] - gIdleMv[i];
     const int magnitude = delta < 0 ? -delta : delta;
     if (magnitude > bestAbs) {
@@ -500,6 +509,9 @@ void loop() {
 
     for (int i = 0; i < kSensorCount; ++i) {
       mv[i] = readChannelMv(i);
+      if (!senseLive(mv[i])) {
+        continue;
+      }
       const int delta = mv[i] - gIdleMv[i];
       if (delta <= -kDeltaMv) {
         anyNorth = true;
@@ -526,6 +538,10 @@ void loop() {
     for (int i = 0; i < kSensorCount; ++i) {
       const int delta = mv[i] - gIdleMv[i];
       Serial.printf("%d:%d", i + 1, mv[i]);
+      if (!senseLive(mv[i])) {
+        Serial.print(i + 1 < kSensorCount ? "  " : "");
+        continue;
+      }
       if (delta <= -kDeltaMv) {
         Serial.print("N");
       } else if (delta >= kDeltaMv) {
