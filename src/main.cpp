@@ -27,7 +27,8 @@
 // no magnet nearby. N is a drop, S is a rise. Idle levels differ per
 // channel, so a fixed threshold falsely treats the low channels as N.
 //
-// SG90 on GPIO23, same column: yellow 23, red 5V, black GND.
+// SG90 on GPIO23. The expansion board prints this column as R23:
+// yellow R23, red 5V, black GND.
 // S present turns it to 180 degrees. Otherwise 0.
 // GPIO32 is the RC522 reset. GPIO34 and GPIO35 are input-only.
 //
