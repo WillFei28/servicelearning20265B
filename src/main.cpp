@@ -27,9 +27,9 @@
 // no magnet nearby. N is a drop, S is a rise. Idle levels differ per
 // channel, so a fixed threshold falsely treats the low channels as N.
 //
-// SG90 on GPIO32, same column: yellow 32, red 5V, black GND.
+// SG90 on GPIO23, same column: yellow 23, red 5V, black GND.
 // S present turns it to 180 degrees. Otherwise 0.
-// GPIO34 and GPIO35 are input-only, so the servo cannot use them.
+// GPIO32 is the RC522 reset. GPIO34 and GPIO35 are input-only.
 //
 // MAX98357A: LRC -> yellow 17, BCLK -> yellow 16, DIN -> yellow 4.
 // VIN -> P4 red, GND -> P4 black. Leave GAIN and SD empty.
@@ -42,7 +42,7 @@
 //
 // RC522, 3.3V only. Do not use a red 5V pin.
 //   3.3V -> the middle 3.3V pin. GND -> black under that pin.
-//   Both 3.3V pins are taken, so RST is GPIO23.
+//   Both 3.3V pins are taken, so RST is GPIO32.
 //   SDA -> yellow 26, SCK -> yellow 33, MOSI -> yellow 25, MISO -> yellow 34.
 //   IRQ stays empty. P35 is input-only and stays empty.
 // The latest N or S stays saved after the magnet leaves. A tap uses that
@@ -63,7 +63,7 @@ static constexpr uint32_t kBlinkHalfMs = 250;
 static constexpr uint32_t kScanMs = 200;
 static constexpr int kSamples = 8;
 static constexpr int kCalRounds = 16;
-static constexpr int kServoPin = 32;
+static constexpr int kServoPin = 23;
 static constexpr int kServoChannel = 0;
 static constexpr int kServoBits = 16;
 static constexpr int kServoPeriodUs = 20000;
@@ -78,7 +78,7 @@ static constexpr int kScreenWidth = 128;
 static constexpr int kScreenHeight = 64;
 static constexpr uint8_t kScreenAddr = 0x3C;
 static constexpr int kRfidSsPin = 26;
-static constexpr int kRfidRstPin = 23;
+static constexpr int kRfidRstPin = 32;
 static constexpr int kRfidSckPin = 33;
 static constexpr int kRfidMosiPin = 25;
 static constexpr int kRfidMisoPin = 34;
