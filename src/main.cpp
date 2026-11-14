@@ -53,7 +53,11 @@
 
 static constexpr int kMosPin = 18;
 static constexpr int kZPin = 35;
-static constexpr int kMinSenseMv = 100;
+static constexpr int kMinSenseMv = 400;
+static constexpr int kMaxSenseMv = 3000;
+static constexpr int kMinIdleMv = 900;
+static constexpr int kMaxIdleMv = 2400;
+static constexpr int kStableMv = 80;
 static constexpr int kS0Pin = 12;
 static constexpr int kS1Pin = 14;
 static constexpr int kS2Pin = 27;
@@ -391,15 +395,30 @@ static void initRfid() {
   Serial.printf("rfid %s 0x%02x\n", gRfidOk ? "ok" : "fail", version);
 }
 
+static int gLastMv[kSensorCount];
+static bool gHaveLast = false;
+
 static bool senseLive(int mv) {
-  return mv >= kMinSenseMv;
+  return mv >= kMinSenseMv && mv <= kMaxSenseMv;
+}
+
+static bool idleLive(int mv) {
+  return mv >= kMinIdleMv && mv <= kMaxIdleMv;
+}
+
+static bool readingStable(int channel, int mv) {
+  if (!gHaveLast) {
+    return false;
+  }
+  const int delta = mv - gLastMv[channel];
+  return delta <= kStableMv && delta >= -kStableMv;
 }
 
 static int nearestPole(const int *mv) {
   int best = -1;
   int bestAbs = kDeltaMv - 1;
   for (int i = 0; i < kSensorCount; ++i) {
-    if (!senseLive(mv[i])) {
+    if (!idleLive(gIdleMv[i]) || !senseLive(mv[i]) || !readingStable(i, mv[i])) {
       continue;
     }
     const int delta = mv[i] - gIdleMv[i];
@@ -507,13 +526,13 @@ void setup() {
   Serial.print("idle");
   for (int i = 0; i < kSensorCount; ++i) {
     Serial.printf(" %d:%d", i + 1, gIdleMv[i]);
-    if (!senseLive(gIdleMv[i])) {
+    if (!idleLive(gIdleMv[i])) {
       ++dead;
     }
   }
   Serial.println();
   if (dead == kSensorCount) {
-    Serial.println("hall dead. Z wire must be P35 yellow");
+    Serial.println("hall idle out of range. powered 49E rests near 1600");
   }
 }
 
@@ -536,7 +555,7 @@ void loop() {
 
     for (int i = 0; i < kSensorCount; ++i) {
       mv[i] = readChannelMv(i);
-      if (!senseLive(mv[i])) {
+      if (!idleLive(gIdleMv[i]) || !senseLive(mv[i]) || !readingStable(i, mv[i])) {
         continue;
       }
       const int delta = mv[i] - gIdleMv[i];
@@ -565,8 +584,13 @@ void loop() {
     for (int i = 0; i < kSensorCount; ++i) {
       const int delta = mv[i] - gIdleMv[i];
       Serial.printf("%d:%d", i + 1, mv[i]);
-      if (!senseLive(mv[i])) {
+      if (!idleLive(gIdleMv[i]) || !senseLive(mv[i])) {
         Serial.print("x");
+        Serial.print(i + 1 < kSensorCount ? "  " : "");
+        continue;
+      }
+      if (!readingStable(i, mv[i])) {
+        Serial.print("?");
         Serial.print(i + 1 < kSensorCount ? "  " : "");
         continue;
       }
@@ -577,6 +601,10 @@ void loop() {
       }
       Serial.print(i + 1 < kSensorCount ? "  " : "");
     }
+    for (int i = 0; i < kSensorCount; ++i) {
+      gLastMv[i] = mv[i];
+    }
+    gHaveLast = true;
     Serial.printf("  -> %s servo%d%s%s%s\n", gLampName, gAnySouth ? 180 : 0,
                   gSoundOn ? " snd" : "",
                   gSavedPole > 0 ? " recN" : (gSavedPole < 0 ? " recS" : ""),
