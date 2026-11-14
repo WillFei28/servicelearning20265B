@@ -18,8 +18,8 @@
 //   VEE -> GND directly under that 3.3V pin. VEE is not 3.3V.
 //   GND -> SD2 black.  E -> P27 black.  Y7 unused.
 //   S0 -> yellow 12, S1 -> yellow 14, S2 -> yellow 27, Z -> yellow 13.
-//   Y0..Y6 -> 49E OUT 1..7. Sensor VCC and GND stay with the 4051,
-//   not on the expansion headers. Marked face outward.
+//   Y0..Y6 -> 49E OUT 1..7. Sensor VCC taps the 4051 VCC pin,
+//   sensor GND taps the 4051 GND pin. Marked face outward.
 // GPIO12 is a strap pin, so S0 is driven low before it becomes an output.
 // GPIO13 is ADC2. Wi-Fi is unused, so that analog read is available.
 //
@@ -41,10 +41,10 @@
 // S present draws a cross. N present draws a tick. Neither leaves the screen blank.
 //
 // RC522, 3.3V only. Do not use a red 5V pin.
-//   The board has one 3.3V pin. RC522 3.3V and RST share it with the 4051 VCC.
-//   GND -> P35 black. P35 yellow cannot drive RST, so that signal pin stays empty.
+//   3.3V -> the middle 3.3V pin. GND -> black under that pin.
+//   Both 3.3V pins are taken, so RST is GPIO23, not tied to 3.3V.
 //   SDA -> yellow 26, SCK -> yellow 33, MOSI -> yellow 25, MISO -> yellow 34.
-//   IRQ and P35 stay empty.
+//   IRQ stays empty. P35 is input-only and stays empty.
 // The latest N or S stays saved after the magnet leaves. A tap uses that
 // saved record, then clears it. S shows -$2.0 and the error clip.
 // N shows +$2.0 and the octopus beep. No saved record does neither.
@@ -78,6 +78,7 @@ static constexpr int kScreenWidth = 128;
 static constexpr int kScreenHeight = 64;
 static constexpr uint8_t kScreenAddr = 0x3C;
 static constexpr int kRfidSsPin = 26;
+static constexpr int kRfidRstPin = 23;
 static constexpr int kRfidSckPin = 33;
 static constexpr int kRfidMosiPin = 25;
 static constexpr int kRfidMisoPin = 34;
@@ -111,7 +112,7 @@ static Clip gClip = Clip::None;
 static uint32_t gNextStartMs = 0;
 static Adafruit_SSD1306 gDisplay(kScreenWidth, kScreenHeight, &Wire, -1);
 static bool gDisplayOk = false;
-static MFRC522 gRfid(kRfidSsPin, MFRC522::UNUSED_PIN);
+static MFRC522 gRfid(kRfidSsPin, kRfidRstPin);
 static bool gRfidOk = false;
 static int gSavedPole = 0;
 static bool gAcceptPole = true;
@@ -361,8 +362,11 @@ static void serviceSound(bool want) {
 }
 
 static void initRfid() {
+  pinMode(kRfidRstPin, OUTPUT);
+  digitalWrite(kRfidRstPin, HIGH);
   SPI.begin(kRfidSckPin, kRfidMisoPin, kRfidMosiPin, kRfidSsPin);
   gRfid.PCD_Init();
+  digitalWrite(kRfidRstPin, HIGH);
   const byte version = gRfid.PCD_ReadRegister(MFRC522::VersionReg);
   gRfidOk = version != 0x00 && version != 0xFF;
   Serial.printf("rfid %s 0x%02x\n", gRfidOk ? "ok" : "fail", version);
