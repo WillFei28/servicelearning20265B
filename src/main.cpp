@@ -51,9 +51,6 @@
 // The latest N or S stays saved after the magnet leaves. A tap uses that
 // saved record, then clears it. S shows -$2.0 and the error clip.
 // N shows +$2.0 and the octopus beep. No saved record does neither.
-// The amp sags the Hall rails during a beep, and one low channel can look
-// like a new N. A new pole is ignored until the fare clip and the fare
-// message have both finished, and it must then hold for two scans.
 
 static constexpr int kMosPin = 18;
 static constexpr int kZPin = 35;
@@ -79,7 +76,6 @@ static constexpr int kServoPinB = 5;
 static constexpr int kServoChannel = 0;
 static constexpr int kServoChannelB = 1;
 static constexpr int kServoBits = 16;
-static constexpr int kPoleHoldScans = 2;
 static constexpr int kServoPeriodUs = 20000;
 static constexpr int kPulse0Us = 544;
 static constexpr int kPulse180Us = 2400;
@@ -449,38 +445,13 @@ static int nearestPole(const int *mv) {
   return 0;
 }
 
-static int gPoleStreak = 0;
-static int gPoleStreakCount = 0;
-
-static bool fareBusy(uint32_t now) {
-  if (paymentActive()) {
-    return true;
-  }
-  return gPay != 0 && static_cast<int32_t>(now - gPayUntil) < 0;
-}
-
-static void rememberPole(const int *mv, uint32_t now) {
-  if (fareBusy(now)) {
-    gPoleStreak = 0;
-    gPoleStreakCount = 0;
-    return;
-  }
+static void rememberPole(const int *mv) {
   const int pole = nearestPole(mv);
   if (pole == 0) {
     gAcceptPole = true;
-    gPoleStreak = 0;
-    gPoleStreakCount = 0;
     return;
   }
-  if (pole == gPoleStreak) {
-    if (gPoleStreakCount < kPoleHoldScans) {
-      ++gPoleStreakCount;
-    }
-  } else {
-    gPoleStreak = pole;
-    gPoleStreakCount = 1;
-  }
-  if (gAcceptPole && gPoleStreakCount >= kPoleHoldScans) {
+  if (gAcceptPole) {
     gSavedPole = pole;
   }
 }
@@ -611,7 +582,7 @@ void loop() {
       gLampName = "blink";
     }
     writeServo(gAnySouth);
-    rememberPole(mv, now);
+    rememberPole(mv);
     feedAudio();
     serviceSound(gAnySouth);
     showPoles(anyNorth, gAnySouth);
