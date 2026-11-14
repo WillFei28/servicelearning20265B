@@ -219,9 +219,24 @@ static void drawCross(int left, int top, int right, int bottom, int radius) {
 
 static void initDisplay() {
   Wire.begin(kSdaPin, kSclPin);
+  Serial.print("i2c");
+  int found = 0;
+  for (uint8_t addr = 1; addr < 127; ++addr) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf(" 0x%02x", addr);
+      ++found;
+    }
+  }
+  if (found == 0) {
+    Serial.print(" none");
+  }
+  Serial.println();
+
   gDisplayOk = gDisplay.begin(SSD1306_SWITCHCAPVCC, kScreenAddr);
+  Serial.printf("display %s sda%d scl%d addr0x%02x\n", gDisplayOk ? "ok" : "FAIL",
+                kSdaPin, kSclPin, kScreenAddr);
   if (!gDisplayOk) {
-    Serial.println("display begin failed");
     return;
   }
   gDisplay.clearDisplay();
@@ -294,6 +309,7 @@ static void initSound() {
   gOut->SetPinout(kBclkPin, kLrcPin, kDinPin);
   gOut->SetGain(0.7);
   gOut->SetOutputModeMono(true);
+  Serial.printf("sound ready bclk%d lrc%d din%d\n", kBclkPin, kLrcPin, kDinPin);
 }
 
 static bool beginClip(const uint8_t *data, unsigned len, Clip clip) {
@@ -478,16 +494,27 @@ void setup() {
   writeServo(false);
 
   Serial.begin(115200);
+  delay(200);
+  Serial.printf("debug z%d s0%d s1%d s2%d rst%d servo%d bclk%d lrc%d din%d\n",
+                kZPin, kS0Pin, kS1Pin, kS2Pin, kRfidRstPin, kServoPin, kBclkPin,
+                kLrcPin, kDinPin);
   initDisplay();
   initRfid();
-  Serial.println("Calibrating. Keep magnets away.");
+  Serial.println("calibrating. keep magnets away");
   calibrateIdle();
   initSound();
+  int dead = 0;
   Serial.print("idle");
   for (int i = 0; i < kSensorCount; ++i) {
     Serial.printf(" %d:%d", i + 1, gIdleMv[i]);
+    if (!senseLive(gIdleMv[i])) {
+      ++dead;
+    }
   }
   Serial.println();
+  if (dead == kSensorCount) {
+    Serial.println("hall dead. Z wire must be P35 yellow");
+  }
 }
 
 void loop() {
@@ -539,6 +566,7 @@ void loop() {
       const int delta = mv[i] - gIdleMv[i];
       Serial.printf("%d:%d", i + 1, mv[i]);
       if (!senseLive(mv[i])) {
+        Serial.print("x");
         Serial.print(i + 1 < kSensorCount ? "  " : "");
         continue;
       }
