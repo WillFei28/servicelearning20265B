@@ -1,0 +1,43 @@
+options:
+  fontname: WenQuanYi Micro Hei
+
+connectors:
+  擴展板:
+    type: ESP32 38-pin 黃針
+    notes: "黃針係訊號。紅針係 5V，跳線帽撥去 5V。黑針係 G。"
+    pinlabels: [P25 黃, P26 黃, P33 黃, 5V 紅, G 黑]
+    pincolors: [YE, YE, YE, RD, BK]
+  MAX98357A:
+    type: 喇叭功放
+    notes: "GAIN 同 SD 留空。唔好接地，亦唔好接 3.3V。"
+    pinlabels: [BCLK, DIN, LRC, VIN, GND, 喇叭+, 喇叭-, GAIN 留空, SD 留空]
+  小喇叭:
+    type: 8Ω
+    notes: "兩條線只鎖喺功放的喇叭螺絲。"
+    pinlabels: [紅, 黑]
+    pincolors: [RD, BK]
+
+cables:
+  杜邦線:
+    colors: [YE, YE, YE, RD, BK]
+    wirelabels: [P25 去 BCLK, P26 去 DIN, P33 去 LRC, 5V 去 VIN, G 去 GND]
+    category: bundle
+    notes: "訊號三條都係黃線，靠針號分辨。"
+  喇叭線:
+    colors: [RD, BK]
+    wirelabels: [紅去喇叭+, 黑去喇叭-]
+    category: bundle
+
+connections:
+  -
+    - 擴展板: [1-5]
+    - 杜邦線: [1-5]
+    - MAX98357A: [1-5]
+  -
+    - MAX98357A: [6-7]
+    - 喇叭線: [1-2]
+    - 小喇叭: [1-2]
+
+metadata:
+  title: EXP 1 接聲音
+  description: "擴展板 P25 黃接 BCLK，P26 黃接 DIN，P33 黃接 LRC。對應 src/main.cpp 的 GPIO25、GPIO26、GPIO33。"

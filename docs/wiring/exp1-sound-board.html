@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>EXP 1 接聲音</title>
+<style>
+  html, body { margin: 0; background: #fff; }
+  body {
+    width: 1440px; height: 980px; overflow: hidden;
+    font-family: "WenQuanYi Micro Hei", sans-serif; color: #1c1c1c;
+  }
+  .sheet { position: relative; width: 1440px; height: 980px; }
+  h1 { position: absolute; margin: 0; left: 48px; top: 22px; font-size: 30px; }
+  .sub { position: absolute; margin: 0; left: 292px; top: 32px; font-size: 16px; color: #555; }
+  svg.wires { position: absolute; inset: 0; }
+  .board {
+    position: absolute; left: 48px; top: 88px; width: 500px; height: 720px;
+    background: #6d4b96; border-radius: 18px;
+    box-shadow: 0 8px 20px rgba(60, 30, 90, 0.16);
+  }
+  .board h2 { margin: 16px 20px 0; color: #fff; font-size: 22px; }
+  .board h2 span { margin-left: 8px; font-size: 15px; font-weight: 500; color: #f3e9ff; }
+  .esp {
+    position: absolute; left: 86px; top: 200px; width: 220px; height: 280px;
+    background: #151515; border-radius: 8px;
+  }
+  .usb { width: 84px; height: 16px; margin: 14px auto 0; background: #c8c8c8; border-radius: 3px; }
+  .esp b { display: block; margin-top: 78px; text-align: center; color: #f4f4f4; font-size: 22px; }
+  .can { width: 150px; height: 52px; margin: 36px auto 0; background: #e4d29a; border-radius: 3px; }
+  .tag, .nub, .pad {
+    position: absolute; transform: translate(-50%, -50%);
+  }
+  .tag { font-size: 16px; color: #e6d8f5; }
+  .tag strong { color: #fff; }
+  .pad { width: 14px; height: 14px; border-radius: 2px; background: #e6c83b; }
+  .pad.dim { background: #c6a84e; }
+  .nub { width: 16px; height: 16px; border-radius: 50%; background: #cfcfcf; }
+  .amp {
+    position: absolute; left: 860px; top: 250px; width: 500px; height: 500px;
+    background: #1b6ca8; border-radius: 16px;
+    box-shadow: 0 8px 20px rgba(20, 60, 100, 0.14);
+  }
+  .amp .name { margin: 22px 0 0; text-align: center; color: #fff; font-size: 20px; font-weight: 700; }
+  .chip { width: 130px; height: 86px; margin: 28px auto 0; background: #0e4e7c; border-radius: 6px; position: relative; }
+  .die { position: absolute; left: 43px; top: 22px; width: 44px; height: 42px; background: #111; }
+  .kind { text-align: center; color: #d7ebff; margin-top: 10px; }
+  .screw {
+    position: absolute; top: -11px; width: 22px; height: 22px; border-radius: 50%;
+    background: #e7eaee; border: 3px solid #8d939a; transform: translateX(-50%);
+  }
+  .screw span { position: absolute; top: 26px; left: 50%; transform: translateX(-50%); font-size: 13px; color: #fff; white-space: nowrap; }
+  .pinlab { position: absolute; transform: translateY(-50%); color: #fff; font-weight: 700; font-size: 16px; }
+  .pinlab.dim { color: #d5e8f6; font-weight: 500; }
+  .spk {
+    position: absolute; left: 1010px; top: 86px; width: 190px; height: 120px;
+    background: #2b2b2b; border-radius: 28px;
+  }
+  .spk em { position: absolute; left: 0; right: 0; top: -24px; text-align: center; font-style: normal; color: #333; }
+  .cone { width: 78px; height: 78px; margin: 21px auto 0; background: #3c3c3c; border-radius: 40px; }
+  .dust { width: 28px; height: 28px; margin: 25px auto 0; background: #111; border-radius: 14px; }
+  .legend {
+    position: absolute; left: 48px; top: 860px; width: 1344px; height: 92px;
+    background: #f6f4f8; border-radius: 12px;
+    display: flex; align-items: center; gap: 26px; padding: 0 28px; box-sizing: border-box; font-size: 18px;
+  }
+  .g { color: #24963b; } .t { color: #0b8f9b; } .p { color: #d45386; } .r { color: #d42727; }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <h1>EXP 1　接聲音</h1>
+  <p class="sub">每一條線左右同高。黃針係訊號。GAIN 同 SD 留空。</p>
+
+  <div class="board">
+    <h2>擴展板<span>ESP32 38-pin</span></h2>
+    <div class="esp"><div class="usb"></div><b>ESP32</b><div class="can"></div></div>
+  </div>
+
+  <div class="tag" style="left:430px;top:260px">P14</div>
+  <div class="pad dim" style="left:478px;top:260px"></div>
+  <div class="nub" style="left:520px;top:260px"></div>
+  <div class="tag" style="left:430px;top:310px">P27</div>
+  <div class="pad dim" style="left:478px;top:310px"></div>
+  <div class="nub" style="left:520px;top:310px"></div>
+
+  <div class="tag" style="left:430px;top:360px"><strong>P26</strong></div>
+  <div class="pad" style="left:478px;top:360px"></div>
+  <div class="nub" style="left:520px;top:360px;background:#2ea043"></div>
+
+  <div class="tag" style="left:430px;top:410px"><strong>P25</strong></div>
+  <div class="pad" style="left:478px;top:410px"></div>
+  <div class="nub" style="left:520px;top:410px;background:#0e9aa7"></div>
+
+  <div class="tag" style="left:430px;top:460px"><strong>P33</strong></div>
+  <div class="pad" style="left:478px;top:460px"></div>
+  <div class="nub" style="left:520px;top:460px;background:#d45386"></div>
+
+  <div class="tag" style="left:430px;top:510px">P32</div>
+  <div class="pad dim" style="left:478px;top:510px"></div>
+  <div class="nub" style="left:520px;top:510px"></div>
+  <div class="tag" style="left:430px;top:560px">P34</div>
+  <div class="pad dim" style="left:478px;top:560px"></div>
+  <div class="nub" style="left:520px;top:560px"></div>
+
+  <div class="tag" style="left:430px;top:640px"><strong>5V</strong></div>
+  <div class="pad" style="left:478px;top:640px;background:#d42727"></div>
+  <div class="nub" style="left:520px;top:640px;background:#d42727"></div>
+  <div class="tag" style="left:444px;top:700px"><strong>G</strong></div>
+  <div class="pad" style="left:478px;top:700px;background:#222"></div>
+  <div class="nub" style="left:520px;top:700px;background:#222"></div>
+
+  <svg class="wires" viewBox="0 0 1440 980">
+    <g fill="none" stroke-linecap="round" stroke-width="8">
+      <path d="M520 360 H860" stroke="#2ea043"/>
+      <path d="M520 410 H860" stroke="#0e9aa7"/>
+      <path d="M520 460 H860" stroke="#d45386"/>
+      <path d="M520 640 H860" stroke="#d42727"/>
+      <path d="M520 700 H860" stroke="#222"/>
+      <path d="M1060 206 V250" stroke="#d42727"/>
+      <path d="M1160 206 V250" stroke="#222"/>
+    </g>
+  </svg>
+
+  <div class="amp">
+    <div class="name">MAX98357A</div>
+    <div class="chip"><div class="die"></div></div>
+    <div class="kind">喇叭功放</div>
+    <div class="screw" style="left:200px"></div>
+    <div class="screw" style="left:300px"></div>
+  </div>
+  <div class="pinlab" style="left:884px;top:360px">DIN</div>
+  <div class="pinlab" style="left:884px;top:410px">BCLK</div>
+  <div class="pinlab" style="left:884px;top:460px">LRC</div>
+  <div class="pinlab dim" style="left:884px;top:530px">GAIN 留空</div>
+  <div class="pinlab dim" style="left:884px;top:580px">SD 留空</div>
+  <div class="pinlab" style="left:884px;top:640px">Vin</div>
+  <div class="pinlab" style="left:884px;top:700px">GND</div>
+
+  <div class="nub" style="left:860px;top:360px;background:#2ea043"></div>
+  <div class="nub" style="left:860px;top:410px;background:#0e9aa7"></div>
+  <div class="nub" style="left:860px;top:460px;background:#d45386"></div>
+  <div class="nub" style="left:860px;top:530px;background:#8fb4cc"></div>
+  <div class="nub" style="left:860px;top:580px;background:#8fb4cc"></div>
+  <div class="nub" style="left:860px;top:640px;background:#d42727"></div>
+  <div class="nub" style="left:860px;top:700px;background:#222"></div>
+
+  <div class="spk"><em>8Ω 小喇叭</em><div class="cone"><div class="dust"></div></div></div>
+
+  <div class="legend">
+    <b>對名插</b>
+    <span>P26 黃針 <b class="g">綠線 → DIN</b></span>
+    <span>P25 黃針 <b class="t">青線 → BCLK</b></span>
+    <span>P33 黃針 <b class="p">粉紅線 → LRC</b></span>
+    <span><b class="r">紅針 5V → Vin</b></span>
+    <span><b>黑針 G → GND</b></span>
+  </div>
+</div>
+</body>
+</html>

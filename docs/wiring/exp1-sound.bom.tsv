@@ -1,0 +1,7 @@
+Id	Description	Qty	Unit	Designators
+1	Connector, 8Ω, 2 pins	1		小喇叭
+2	Connector, ESP32 38-pin 黃針, 5 pins	1		擴展板
+3	Connector, 喇叭功放, 9 pins	1		MAX98357A
+4	Wire, BK	0	m	喇叭線, 杜邦線
+5	Wire, RD	0	m	喇叭線, 杜邦線
+6	Wire, YE	0	m	杜邦線
