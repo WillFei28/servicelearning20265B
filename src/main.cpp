@@ -31,6 +31,8 @@
 // Two SG90 servos move together. The expansion board prints GPIO23 as R23:
 // yellow R23, red 5V, black GND. The second servo is yellow P5, red 5V, black GND.
 // S present turns both to 180 degrees. Otherwise both sit at 0.
+// After S is seen, both stay at 180 until south is absent for
+// kSouthHoldScans scans, so one unstable reading cannot swing them back.
 // GPIO5 is a strap pin, so it is left alone until setup attaches the servo.
 // GPIO32 is the RC522 reset. GPIO34 and GPIO35 are input-only.
 //
@@ -79,6 +81,7 @@ static constexpr int kServoBits = 16;
 static constexpr int kServoPeriodUs = 20000;
 static constexpr int kPulse0Us = 544;
 static constexpr int kPulse180Us = 2400;
+static constexpr int kSouthHoldScans = 3;
 static constexpr int kLrcPin = 17;
 static constexpr int kBclkPin = 16;
 static constexpr int kDinPin = 4;
@@ -102,6 +105,8 @@ static int gIdleMv[kSensorCount];
 static Lamp gLamp = Lamp::Off;
 static const char *gLampName = "off";
 static bool gAnySouth = false;
+static bool gServoSouth = false;
+static int gSouthMiss = 0;
 
 enum class Clip : uint8_t { None, Crossing, Error, Octopus };
 
@@ -166,6 +171,22 @@ static void calibrateIdle() {
   }
   for (int i = 0; i < kSensorCount; ++i) {
     gIdleMv[i] = static_cast<int>(sum[i] / kCalRounds);
+  }
+}
+
+static void updateServoHold(bool southNow) {
+  if (southNow) {
+    gServoSouth = true;
+    gSouthMiss = 0;
+    return;
+  }
+  if (!gServoSouth) {
+    return;
+  }
+  ++gSouthMiss;
+  if (gSouthMiss >= kSouthHoldScans) {
+    gServoSouth = false;
+    gSouthMiss = 0;
   }
 }
 
@@ -581,7 +602,8 @@ void loop() {
       gLamp = Lamp::Blink;
       gLampName = "blink";
     }
-    writeServo(gAnySouth);
+    updateServoHold(gAnySouth);
+    writeServo(gServoSouth);
     rememberPole(mv);
     feedAudio();
     serviceSound(gAnySouth);
@@ -611,7 +633,7 @@ void loop() {
       gLastMv[i] = mv[i];
     }
     gHaveLast = true;
-    Serial.printf("  -> %s servo%d%s%s%s\n", gLampName, gAnySouth ? 180 : 0,
+    Serial.printf("  -> %s servo%d%s%s%s\n", gLampName, gServoSouth ? 180 : 0,
                   gSoundOn ? " snd" : "",
                   gSavedPole > 0 ? " recN" : (gSavedPole < 0 ? " recS" : ""),
                   gPay > 0 ? " +$2.0" : (gPay < 0 ? " -$2.0" : ""));
