@@ -30,7 +30,8 @@
 //
 // Two SG90 servos move together. The expansion board prints GPIO23 as R23:
 // yellow R23, red 5V, black GND. The second servo is yellow P5, red 5V, black GND.
-// S present turns both to 180 degrees. Otherwise both sit at 0.
+// Gp1: S present turns the servo to 90 degrees. Otherwise it sits at 0.
+// Other groups on their branches may use 180 for both servos.
 // GPIO5 is a strap pin, so it is left alone until setup attaches the servo.
 // GPIO32 is the RC522 reset. GPIO34 and GPIO35 are input-only.
 //
@@ -79,6 +80,9 @@ static constexpr int kServoBits = 16;
 static constexpr int kServoPeriodUs = 20000;
 static constexpr int kPulse0Us = 544;
 static constexpr int kPulse180Us = 2400;
+static constexpr int kServoSouthDegrees = 90;
+static constexpr int kPulseSouthUs =
+    kPulse0Us + (kPulse180Us - kPulse0Us) * kServoSouthDegrees / 180;
 static constexpr int kLrcPin = 17;
 static constexpr int kBclkPin = 16;
 static constexpr int kDinPin = 4;
@@ -171,12 +175,12 @@ static void calibrateIdle() {
 
 static void writeServo(bool southPresent) {
   static int lastAngle = -1;
-  const int angle = southPresent ? 180 : 0;
+  const int angle = southPresent ? kServoSouthDegrees : 0;
   if (angle == lastAngle) {
     return;
   }
   lastAngle = angle;
-  const int pulseUs = southPresent ? kPulse180Us : kPulse0Us;
+  const int pulseUs = southPresent ? kPulseSouthUs : kPulse0Us;
   const uint32_t duty =
       static_cast<uint32_t>(pulseUs) * ((1u << kServoBits) - 1) / kServoPeriodUs;
   ledcWrite(kServoChannel, duty);
@@ -611,7 +615,8 @@ void loop() {
       gLastMv[i] = mv[i];
     }
     gHaveLast = true;
-    Serial.printf("  -> %s servo%d%s%s%s\n", gLampName, gAnySouth ? 180 : 0,
+    Serial.printf("  -> %s servo%d%s%s%s\n", gLampName,
+                  gAnySouth ? kServoSouthDegrees : 0,
                   gSoundOn ? " snd" : "",
                   gSavedPole > 0 ? " recN" : (gSavedPole < 0 ? " recS" : ""),
                   gPay > 0 ? " +$2.0" : (gPay < 0 ? " -$2.0" : ""));
