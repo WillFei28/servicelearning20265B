@@ -24,6 +24,8 @@
 //
 // SG90 on GPIO13: orange wire to yellow 13, red wire to a red 5V pin,
 // brown wire to black G. S present turns it to 180 degrees. Otherwise 0.
+// After S is seen, it stays at 180 until south is absent for kSouthHoldScans
+// scans, so one unstable reading cannot swing it back.
 //
 // MAX98357A: LRC -> yellow 33, BCLK -> yellow 25, DIN -> yellow 26.
 // VIN -> red 5V, GND -> black G. Leave GAIN and SD empty.
@@ -62,6 +64,7 @@ static constexpr int kServoBits = 16;
 static constexpr int kServoPeriodUs = 20000;
 static constexpr int kPulse0Us = 544;
 static constexpr int kPulse180Us = 2400;
+static constexpr int kSouthHoldScans = 3;
 static constexpr int kLrcPin = 33;
 static constexpr int kBclkPin = 25;
 static constexpr int kDinPin = 26;
@@ -85,6 +88,8 @@ static int gIdleMv[kSensorCount];
 static Lamp gLamp = Lamp::Off;
 static const char *gLampName = "off";
 static bool gAnySouth = false;
+static bool gServoSouth = false;
+static int gSouthMiss = 0;
 
 enum class Clip : uint8_t { None, Crossing, Error, Octopus };
 
@@ -149,6 +154,22 @@ static void calibrateIdle() {
   }
   for (int i = 0; i < kSensorCount; ++i) {
     gIdleMv[i] = static_cast<int>(sum[i] / kCalRounds);
+  }
+}
+
+static void updateServoHold(bool southNow) {
+  if (southNow) {
+    gServoSouth = true;
+    gSouthMiss = 0;
+    return;
+  }
+  if (!gServoSouth) {
+    return;
+  }
+  ++gSouthMiss;
+  if (gSouthMiss >= kSouthHoldScans) {
+    gServoSouth = false;
+    gSouthMiss = 0;
   }
 }
 
@@ -503,7 +524,8 @@ void loop() {
       gLamp = Lamp::Blink;
       gLampName = "blink";
     }
-    writeServo(gAnySouth);
+    updateServoHold(gAnySouth);
+    writeServo(gServoSouth);
     rememberPole(mv);
     feedAudio();
     serviceSound(gAnySouth);
@@ -519,7 +541,7 @@ void loop() {
       }
       Serial.print(i + 1 < kSensorCount ? "  " : "");
     }
-    Serial.printf("  -> %s servo%d%s%s%s\n", gLampName, gAnySouth ? 180 : 0,
+    Serial.printf("  -> %s servo%d%s%s%s\n", gLampName, gServoSouth ? 180 : 0,
                   gSoundOn ? " snd" : "",
                   gSavedPole > 0 ? " recN" : (gSavedPole < 0 ? " recS" : ""),
                   gPay > 0 ? " +$2.0" : (gPay < 0 ? " -$2.0" : ""));
