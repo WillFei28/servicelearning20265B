@@ -10,7 +10,11 @@
 
 #include "crossing_mp3.h"
 
-// Seven 49E Hall sensors through one 74HC4051. GPIO18 drives the MOS.
+// Seven 49E Hall sensors through one 74HC4051. GPIO18 and GPIO19 drive
+// the two 5V LEDs. Each LED has its own built-in resistor: red wire to
+// the GPIO pin, black wire to GND. No MOSFET module on this group.
+// Never wire the LEDs to a red 5V pin: 5V back into a GPIO pin damages
+// the ESP32.
 // The expansion-board jumper is set to 5V, so every red pin is 5V.
 //
 // 74HC4051, single 3.3V supply:
@@ -28,10 +32,12 @@
 // no magnet nearby. N is a drop, S is a rise. Idle levels differ per
 // channel, so a fixed threshold falsely treats the low channels as N.
 //
-// Two SG90 servos move together. The expansion board prints GPIO23 as R23:
+// Two SG90 servos move mirrored: one clockwise, one counter-clockwise.
+// The expansion board prints GPIO23 as R23:
 // yellow R23, red 5V, black GND. The second servo is yellow P5, red 5V, black GND.
-// S present turns both to 180 degrees. Otherwise both sit at 0.
-// After S is seen, both stay at 180 until south is absent for
+// S present turns servo A (R23) to 180 degrees and servo B (P5) to
+// 0 degrees. Otherwise A sits at 0 and B sits at 180.
+// After S is seen, both hold until south is absent for
 // kSouthHoldScans scans, so one unstable reading cannot swing them back.
 // GPIO5 is a strap pin, so it is left alone until setup attaches the servo.
 // GPIO32 is the RC522 reset. GPIO34 and GPIO35 are input-only.
@@ -54,7 +60,8 @@
 // saved record, then clears it. S shows -$2.0 and the error clip.
 // N shows +$2.0 and the octopus beep. No saved record does neither.
 
-static constexpr int kMosPin = 18;
+static constexpr int kLampPin = 18;
+static constexpr int kLamp2Pin = 19;
 static constexpr int kZPin = 35;
 static constexpr int kMinSenseMv = 400;
 static constexpr int kMaxSenseMv = 3000;
@@ -198,10 +205,13 @@ static void writeServo(bool southPresent) {
   }
   lastAngle = angle;
   const int pulseUs = southPresent ? kPulse180Us : kPulse0Us;
+  const int pulseUsB = southPresent ? kPulse0Us : kPulse180Us;
   const uint32_t duty =
       static_cast<uint32_t>(pulseUs) * ((1u << kServoBits) - 1) / kServoPeriodUs;
+  const uint32_t dutyB =
+      static_cast<uint32_t>(pulseUsB) * ((1u << kServoBits) - 1) / kServoPeriodUs;
   ledcWrite(kServoChannel, duty);
-  ledcWrite(kServoChannelB, duty);
+  ledcWrite(kServoChannelB, dutyB);
 }
 
 static void setLamp(Lamp lamp) {
@@ -209,11 +219,13 @@ static void setLamp(Lamp lamp) {
   static uint32_t lastToggleMs = 0;
 
   if (lamp == Lamp::Solid) {
-    digitalWrite(kMosPin, HIGH);
+    digitalWrite(kLampPin, HIGH);
+    digitalWrite(kLamp2Pin, HIGH);
     return;
   }
   if (lamp == Lamp::Off) {
-    digitalWrite(kMosPin, LOW);
+    digitalWrite(kLampPin, LOW);
+    digitalWrite(kLamp2Pin, LOW);
     blinkOn = false;
     return;
   }
@@ -222,7 +234,8 @@ static void setLamp(Lamp lamp) {
   if (now - lastToggleMs >= kBlinkHalfMs) {
     lastToggleMs = now;
     blinkOn = !blinkOn;
-    digitalWrite(kMosPin, blinkOn ? HIGH : LOW);
+    digitalWrite(kLampPin, blinkOn ? HIGH : LOW);
+    digitalWrite(kLamp2Pin, blinkOn ? HIGH : LOW);
   }
 }
 
@@ -526,9 +539,13 @@ void setup() {
   digitalWrite(kS1Pin, LOW);
   digitalWrite(kS2Pin, LOW);
 
-  digitalWrite(kMosPin, LOW);
-  pinMode(kMosPin, OUTPUT);
-  digitalWrite(kMosPin, LOW);
+  digitalWrite(kLampPin, LOW);
+  pinMode(kLampPin, OUTPUT);
+  digitalWrite(kLampPin, LOW);
+
+  digitalWrite(kLamp2Pin, LOW);
+  pinMode(kLamp2Pin, OUTPUT);
+  digitalWrite(kLamp2Pin, LOW);
 
   analogReadResolution(12);
   analogSetPinAttenuation(kZPin, ADC_11db);
@@ -541,9 +558,9 @@ void setup() {
 
   Serial.begin(115200);
   delay(200);
-  Serial.printf("debug z%d s0%d s1%d s2%d rst%d servo%d+%d bclk%d lrc%d din%d\n",
+  Serial.printf("debug z%d s0%d s1%d s2%d rst%d servo%d+%drev bclk%d lrc%d din%d lamp%d+%d\n",
                 kZPin, kS0Pin, kS1Pin, kS2Pin, kRfidRstPin, kServoPin, kServoPinB,
-                kBclkPin, kLrcPin, kDinPin);
+                kBclkPin, kLrcPin, kDinPin, kLampPin, kLamp2Pin);
   initDisplay();
   initRfid();
   Serial.println("calibrating. keep magnets away");
@@ -633,7 +650,8 @@ void loop() {
       gLastMv[i] = mv[i];
     }
     gHaveLast = true;
-    Serial.printf("  -> %s servo%d%s%s%s\n", gLampName, gServoSouth ? 180 : 0,
+    Serial.printf("  -> %s servo%d/%d%s%s%s\n", gLampName, gServoSouth ? 180 : 0,
+                  gServoSouth ? 0 : 180,
                   gSoundOn ? " snd" : "",
                   gSavedPole > 0 ? " recN" : (gSavedPole < 0 ? " recS" : ""),
                   gPay > 0 ? " +$2.0" : (gPay < 0 ? " -$2.0" : ""));
