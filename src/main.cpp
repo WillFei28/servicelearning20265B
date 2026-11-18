@@ -28,6 +28,20 @@
 // no magnet nearby. N is a drop, S is a rise. Idle levels differ per
 // channel, so a fixed threshold falsely treats the low channels as N.
 //
+// Gp4 adds one more 49E that does not go through the 4051. It plays
+// the car, while the seven muxed sensors play pedestrians on the road:
+//   OUT -> yellow 34 (GPIO34, ADC1, input-only), VCC -> middle 3.3V,
+//   GND -> black under that pin. GPIO34 is also the RC522 MISO pin,
+//   but this group has no reader, so the pin belongs to the car sensor.
+//   RFID init runs first and fails with no reader, and no SPI traffic
+//   follows, so the ADC reading on GPIO34 is undisturbed.
+// A car counts when the eighth sensor moves 250 mV or more from its
+// own boot idle, either pole. No magnet means no car.
+// Warning rule: the lamp blinks and the crossing clip loops only while
+// an S pedestrian AND the car are present together. S alone or the car
+// alone leaves the lamp off and the sound stopped. N still holds the
+// lamp solid, with no sound.
+//
 // Two SG90 servos move together. The expansion board prints GPIO23 as R23:
 // yellow R23, red 5V, black GND. The second servo is yellow P5, red 5V, black GND.
 // S present turns both to 180 degrees. Otherwise both sit at 0.
@@ -38,7 +52,7 @@
 //
 // MAX98357A: LRC -> yellow 17, BCLK -> yellow 16, DIN -> yellow 4.
 // VIN -> P4 red, GND -> P4 black. Leave GAIN and SD empty.
-// While any S is present the crossing clip loops.
+// While an S pedestrian and the car are both present the crossing clip loops.
 // A card tap interrupts it with one error or octopus beep, then the loop resumes.
 //
 // 0.96 inch SSD1306, 128x64, I2C, unchanged:
@@ -65,6 +79,7 @@ static constexpr int kS0Pin = 12;
 static constexpr int kS1Pin = 14;
 static constexpr int kS2Pin = 27;
 static constexpr int kSensorCount = 7;
+static constexpr int kCarPin = 34;
 
 static constexpr int kAdcMax = 4095;
 static constexpr int kAdcFullScaleMv = 3300;
@@ -102,9 +117,12 @@ static constexpr uint32_t kCardPollMs = 40;
 enum class Lamp : uint8_t { Off, Solid, Blink };
 
 static int gIdleMv[kSensorCount];
+static int gCarIdleMv = 0;
+static int gCarLastMv = 0;
 static Lamp gLamp = Lamp::Off;
 static const char *gLampName = "off";
 static bool gAnySouth = false;
+static bool gWarn = false;
 static bool gServoSouth = false;
 static int gSouthMiss = 0;
 
@@ -162,16 +180,32 @@ static int readChannelMv(int channel) {
   return static_cast<int>((sum / kSamples) * kAdcFullScaleMv / kAdcMax);
 }
 
+static int readCarMv() {
+  feedAudio();
+  delayMicroseconds(800);
+  analogRead(kCarPin);
+
+  long sum = 0;
+  for (int i = 0; i < kSamples; ++i) {
+    sum += analogRead(kCarPin);
+    delayMicroseconds(80);
+  }
+  return static_cast<int>((sum / kSamples) * kAdcFullScaleMv / kAdcMax);
+}
+
 static void calibrateIdle() {
   long sum[kSensorCount] = {};
+  long carSum = 0;
   for (int round = 0; round < kCalRounds; ++round) {
     for (int i = 0; i < kSensorCount; ++i) {
       sum[i] += readChannelMv(i);
     }
+    carSum += readCarMv();
   }
   for (int i = 0; i < kSensorCount; ++i) {
     gIdleMv[i] = static_cast<int>(sum[i] / kCalRounds);
   }
+  gCarIdleMv = static_cast<int>(carSum / kCalRounds);
 }
 
 static void updateServoHold(bool southNow) {
@@ -439,6 +473,14 @@ static bool readingStable(int channel, int mv) {
   return delta <= kStableMv && delta >= -kStableMv;
 }
 
+static bool carStable(int mv) {
+  if (!gHaveLast) {
+    return false;
+  }
+  const int delta = mv - gCarLastMv;
+  return delta <= kStableMv && delta >= -kStableMv;
+}
+
 static int nearestPole(const int *mv) {
   int best = -1;
   int bestAbs = kDeltaMv - 1;
@@ -532,6 +574,7 @@ void setup() {
 
   analogReadResolution(12);
   analogSetPinAttenuation(kZPin, ADC_11db);
+  analogSetPinAttenuation(kCarPin, ADC_11db);
 
   ledcSetup(kServoChannel, 50, kServoBits);
   ledcSetup(kServoChannelB, 50, kServoBits);
@@ -541,9 +584,9 @@ void setup() {
 
   Serial.begin(115200);
   delay(200);
-  Serial.printf("debug z%d s0%d s1%d s2%d rst%d servo%d+%d bclk%d lrc%d din%d\n",
+  Serial.printf("debug z%d s0%d s1%d s2%d rst%d servo%d+%d bclk%d lrc%d din%d car%d\n",
                 kZPin, kS0Pin, kS1Pin, kS2Pin, kRfidRstPin, kServoPin, kServoPinB,
-                kBclkPin, kLrcPin, kDinPin);
+                kBclkPin, kLrcPin, kDinPin, kCarPin);
   initDisplay();
   initRfid();
   Serial.println("calibrating. keep magnets away");
@@ -557,7 +600,11 @@ void setup() {
       ++dead;
     }
   }
+  Serial.printf(" car:%d", gCarIdleMv);
   Serial.println();
+  if (!idleLive(gCarIdleMv)) {
+    Serial.println("car idle out of range. powered 49E rests near 1600");
+  }
   if (dead == kSensorCount) {
     Serial.println("hall idle out of range. powered 49E rests near 1600");
   }
@@ -593,12 +640,20 @@ void loop() {
       }
     }
 
+    const int carMv = readCarMv();
+    bool carPresent = false;
+    if (idleLive(gCarIdleMv) && senseLive(carMv) && carStable(carMv)) {
+      const int carDelta = carMv - gCarIdleMv;
+      carPresent = carDelta <= -kDeltaMv || carDelta >= kDeltaMv;
+    }
+    gWarn = gAnySouth && carPresent;
+
     gLamp = Lamp::Off;
     gLampName = "off";
     if (anyNorth) {
       gLamp = Lamp::Solid;
       gLampName = "solid";
-    } else if (gAnySouth) {
+    } else if (gWarn) {
       gLamp = Lamp::Blink;
       gLampName = "blink";
     }
@@ -606,7 +661,7 @@ void loop() {
     writeServo(gServoSouth);
     rememberPole(mv);
     feedAudio();
-    serviceSound(gAnySouth);
+    serviceSound(gWarn);
     showPoles(anyNorth, gAnySouth);
 
     for (int i = 0; i < kSensorCount; ++i) {
@@ -629,6 +684,15 @@ void loop() {
       }
       Serial.print(i + 1 < kSensorCount ? "  " : "");
     }
+    Serial.printf("  car:%d", carMv);
+    if (!idleLive(gCarIdleMv) || !senseLive(carMv)) {
+      Serial.print("x");
+    } else if (!carStable(carMv)) {
+      Serial.print("?");
+    } else if (carPresent) {
+      Serial.print("C");
+    }
+    gCarLastMv = carMv;
     for (int i = 0; i < kSensorCount; ++i) {
       gLastMv[i] = mv[i];
     }
@@ -641,5 +705,5 @@ void loop() {
 
   setLamp(gLamp);
   feedAudio();
-  serviceSound(gAnySouth);
+  serviceSound(gWarn);
 }
